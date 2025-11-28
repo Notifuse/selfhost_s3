@@ -1,5 +1,10 @@
 # selfhost_s3
 
+[![Go](https://github.com/Notifuse/selfhost_s3/actions/workflows/go.yml/badge.svg)](https://github.com/Notifuse/selfhost_s3/actions/workflows/go.yml)
+[![Docker](https://github.com/Notifuse/selfhost_s3/actions/workflows/docker.yml/badge.svg)](https://github.com/Notifuse/selfhost_s3/actions/workflows/docker.yml)
+[![codecov](https://codecov.io/gh/Notifuse/selfhost_s3/branch/main/graph/badge.svg)](https://codecov.io/gh/Notifuse/selfhost_s3)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Notifuse/selfhost_s3)](https://goreportcard.com/report/github.com/Notifuse/selfhost_s3)
+
 A minimal S3-compatible object storage server written in Go that persists files to the local filesystem. Designed for development and self-hosted deployments where a full S3 service is overkill.
 
 ## Features
