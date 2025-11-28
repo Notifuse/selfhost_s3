@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,6 +27,14 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	store, err := storage.NewStorage(cfg.StoragePath, cfg.Bucket)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize storage: %w", err)
+	}
+
+	// Create public directory if configured
+	if cfg.PublicPrefix != "" {
+		if err := store.EnsurePublicDir(cfg.PublicPrefix); err != nil {
+			return nil, fmt.Errorf("failed to create public directory: %w", err)
+		}
+		log.Printf("Public access enabled for prefix: %s", cfg.PublicPrefix)
 	}
 
 	return &Server{
@@ -92,20 +101,13 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 // handleRequest routes S3 API requests
 func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Log the request
 	log.Printf("%s %s", r.Method, r.URL.Path)
-
-	// Validate authentication
-	if err := s.auth.ValidateRequest(r); err != nil {
-		log.Printf("Auth error: %v", err)
-		s.sendError(w, http.StatusForbidden, "AccessDenied", err.Error())
-		return
-	}
 
 	// Parse the path: /{bucket}/{key}
 	path := strings.TrimPrefix(r.URL.Path, "/")
@@ -119,6 +121,20 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) >= 2 {
 		key = parts[1]
+	}
+
+	// Check if this is a public request (GET/HEAD on public prefix)
+	isPublicRequest := s.config.PublicPrefix != "" &&
+		strings.HasPrefix(key, s.config.PublicPrefix) &&
+		(r.Method == http.MethodGet || r.Method == http.MethodHead)
+
+	// Validate authentication (skip for public requests)
+	if !isPublicRequest {
+		if err := s.auth.ValidateRequest(r); err != nil {
+			log.Printf("Auth error: %v", err)
+			s.sendError(w, http.StatusForbidden, "AccessDenied", err.Error())
+			return
+		}
 	}
 
 	// Check bucket matches configured bucket
@@ -136,10 +152,10 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 			// List objects (legacy)
 			s.handleListObjectsV2(w, r)
 		} else {
-			s.handleGetObject(w, r, key)
+			s.handleGetObject(w, r, key, isPublicRequest)
 		}
 	case http.MethodHead:
-		s.handleHeadObject(w, r, key)
+		s.handleHeadObject(w, r, key, isPublicRequest)
 	case http.MethodPut:
 		s.handlePutObject(w, r, key)
 	case http.MethodDelete:
@@ -150,7 +166,7 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetObject handles GET requests for objects
-func (s *Server) handleGetObject(w http.ResponseWriter, r *http.Request, key string) {
+func (s *Server) handleGetObject(w http.ResponseWriter, r *http.Request, key string, isPublicRequest bool) {
 	obj, reader, err := s.storage.GetObject(key)
 	if err != nil {
 		if err == storage.ErrNotFound {
@@ -160,19 +176,31 @@ func (s *Server) handleGetObject(w http.ResponseWriter, r *http.Request, key str
 		s.sendError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	w.Header().Set("Content-Type", obj.ContentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 	w.Header().Set("ETag", obj.ETag)
 	w.Header().Set("Last-Modified", obj.LastModified.UTC().Format(http.TimeFormat))
+
+	// Add cache header for public files
+	if isPublicRequest && s.config.PublicCacheMaxAge > 0 {
+		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.config.PublicCacheMaxAge))
+	}
+
+	// Handle download parameter
+	if r.URL.Query().Get("download") == "1" {
+		filename := filepath.Base(key)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	}
+
 	w.WriteHeader(http.StatusOK)
 
-	io.Copy(w, reader)
+	_, _ = io.Copy(w, reader)
 }
 
 // handleHeadObject handles HEAD requests for objects
-func (s *Server) handleHeadObject(w http.ResponseWriter, r *http.Request, key string) {
+func (s *Server) handleHeadObject(w http.ResponseWriter, r *http.Request, key string, isPublicRequest bool) {
 	obj, err := s.storage.HeadObject(key)
 	if err != nil {
 		if err == storage.ErrNotFound {
@@ -187,6 +215,12 @@ func (s *Server) handleHeadObject(w http.ResponseWriter, r *http.Request, key st
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 	w.Header().Set("ETag", obj.ETag)
 	w.Header().Set("Last-Modified", obj.LastModified.UTC().Format(http.TimeFormat))
+
+	// Add cache header for public files
+	if isPublicRequest && s.config.PublicCacheMaxAge > 0 {
+		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.config.PublicCacheMaxAge))
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -271,8 +305,8 @@ func (s *Server) handleListObjectsV2(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	xmlData, _ := xml.MarshalIndent(response, "", "  ")
-	w.Write([]byte(xml.Header))
-	w.Write(xmlData)
+	_, _ = w.Write([]byte(xml.Header))
+	_, _ = w.Write(xmlData)
 }
 
 // sendError sends an S3-style error response
@@ -287,8 +321,8 @@ func (s *Server) sendError(w http.ResponseWriter, statusCode int, code, message 
 	}
 
 	xmlData, _ := xml.MarshalIndent(errorResponse, "", "  ")
-	w.Write([]byte(xml.Header))
-	w.Write(xmlData)
+	_, _ = w.Write([]byte(xml.Header))
+	_, _ = w.Write(xmlData)
 }
 
 // XML response structures

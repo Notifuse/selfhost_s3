@@ -53,7 +53,7 @@ func TestLoad_RequiredFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clearEnvVars()
 			for k, v := range tt.envVars {
-				os.Setenv(k, v)
+				_ = os.Setenv(k, v)
 			}
 
 			cfg, err := Load()
@@ -81,9 +81,9 @@ func TestLoad_RequiredFields(t *testing.T) {
 
 func TestLoad_DefaultValues(t *testing.T) {
 	clearEnvVars()
-	os.Setenv("S3_BUCKET", "test-bucket")
-	os.Setenv("S3_ACCESS_KEY", "access-key")
-	os.Setenv("S3_SECRET_KEY", "secret-key")
+	_ = os.Setenv("S3_BUCKET", "test-bucket")
+	_ = os.Setenv("S3_ACCESS_KEY", "access-key")
+	_ = os.Setenv("S3_SECRET_KEY", "secret-key")
 
 	cfg, err := Load()
 	if err != nil {
@@ -110,14 +110,14 @@ func TestLoad_DefaultValues(t *testing.T) {
 
 func TestLoad_OptionalFields(t *testing.T) {
 	clearEnvVars()
-	os.Setenv("S3_BUCKET", "my-bucket")
-	os.Setenv("S3_ACCESS_KEY", "my-access-key")
-	os.Setenv("S3_SECRET_KEY", "my-secret-key")
-	os.Setenv("S3_PORT", "8080")
-	os.Setenv("S3_STORAGE_PATH", "/var/data/s3")
-	os.Setenv("S3_REGION", "eu-west-1")
-	os.Setenv("S3_CORS_ORIGINS", "https://example.com, https://app.example.com")
-	os.Setenv("S3_MAX_FILE_SIZE", "50MB")
+	_ = os.Setenv("S3_BUCKET", "my-bucket")
+	_ = os.Setenv("S3_ACCESS_KEY", "my-access-key")
+	_ = os.Setenv("S3_SECRET_KEY", "my-secret-key")
+	_ = os.Setenv("S3_PORT", "8080")
+	_ = os.Setenv("S3_STORAGE_PATH", "/var/data/s3")
+	_ = os.Setenv("S3_REGION", "eu-west-1")
+	_ = os.Setenv("S3_CORS_ORIGINS", "https://example.com, https://app.example.com")
+	_ = os.Setenv("S3_MAX_FILE_SIZE", "50MB")
 
 	cfg, err := Load()
 	if err != nil {
@@ -158,10 +158,10 @@ func TestLoad_OptionalFields(t *testing.T) {
 
 func TestLoad_InvalidPort(t *testing.T) {
 	clearEnvVars()
-	os.Setenv("S3_BUCKET", "test-bucket")
-	os.Setenv("S3_ACCESS_KEY", "access-key")
-	os.Setenv("S3_SECRET_KEY", "secret-key")
-	os.Setenv("S3_PORT", "not-a-number")
+	_ = os.Setenv("S3_BUCKET", "test-bucket")
+	_ = os.Setenv("S3_ACCESS_KEY", "access-key")
+	_ = os.Setenv("S3_SECRET_KEY", "secret-key")
+	_ = os.Setenv("S3_PORT", "not-a-number")
 
 	_, err := Load()
 	if err == nil {
@@ -171,10 +171,10 @@ func TestLoad_InvalidPort(t *testing.T) {
 
 func TestLoad_InvalidMaxFileSize(t *testing.T) {
 	clearEnvVars()
-	os.Setenv("S3_BUCKET", "test-bucket")
-	os.Setenv("S3_ACCESS_KEY", "access-key")
-	os.Setenv("S3_SECRET_KEY", "secret-key")
-	os.Setenv("S3_MAX_FILE_SIZE", "invalid")
+	_ = os.Setenv("S3_BUCKET", "test-bucket")
+	_ = os.Setenv("S3_ACCESS_KEY", "access-key")
+	_ = os.Setenv("S3_SECRET_KEY", "secret-key")
+	_ = os.Setenv("S3_MAX_FILE_SIZE", "invalid")
 
 	_, err := Load()
 	if err == nil {
@@ -226,6 +226,116 @@ func TestParseSize(t *testing.T) {
 	}
 }
 
+func TestLoad_PublicPrefix(t *testing.T) {
+	tests := []struct {
+		name           string
+		envValue       string
+		setEnv         bool
+		expectedPrefix string
+	}{
+		{
+			name:           "default value when not set",
+			setEnv:         false,
+			expectedPrefix: "public/",
+		},
+		{
+			name:           "custom prefix without trailing slash",
+			envValue:       "assets",
+			setEnv:         true,
+			expectedPrefix: "assets/",
+		},
+		{
+			name:           "custom prefix with trailing slash",
+			envValue:       "files/",
+			setEnv:         true,
+			expectedPrefix: "files/",
+		},
+		{
+			name:           "empty string disables public access",
+			envValue:       "",
+			setEnv:         true,
+			expectedPrefix: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnvVars()
+			_ = os.Setenv("S3_BUCKET", "test-bucket")
+			_ = os.Setenv("S3_ACCESS_KEY", "access-key")
+			_ = os.Setenv("S3_SECRET_KEY", "secret-key")
+
+			if tt.setEnv {
+				_ = os.Setenv("S3_PUBLIC_PREFIX", tt.envValue)
+			}
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if cfg.PublicPrefix != tt.expectedPrefix {
+				t.Errorf("expected PublicPrefix %q, got %q", tt.expectedPrefix, cfg.PublicPrefix)
+			}
+		})
+	}
+}
+
+func TestLoad_PublicCacheMaxAge(t *testing.T) {
+	tests := []struct {
+		name        string
+		envValue    string
+		setEnv      bool
+		expectedAge int
+	}{
+		{
+			name:        "default value when not set",
+			setEnv:      false,
+			expectedAge: 31536000, // 1 year
+		},
+		{
+			name:        "custom value",
+			envValue:    "3600",
+			setEnv:      true,
+			expectedAge: 3600,
+		},
+		{
+			name:        "zero disables caching",
+			envValue:    "0",
+			setEnv:      true,
+			expectedAge: 0,
+		},
+		{
+			name:        "invalid value uses default",
+			envValue:    "invalid",
+			setEnv:      true,
+			expectedAge: 31536000, // keeps default on invalid
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnvVars()
+			_ = os.Setenv("S3_BUCKET", "test-bucket")
+			_ = os.Setenv("S3_ACCESS_KEY", "access-key")
+			_ = os.Setenv("S3_SECRET_KEY", "secret-key")
+
+			if tt.setEnv {
+				_ = os.Setenv("S3_PUBLIC_CACHE_MAX_AGE", tt.envValue)
+			}
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if cfg.PublicCacheMaxAge != tt.expectedAge {
+				t.Errorf("expected PublicCacheMaxAge %d, got %d", tt.expectedAge, cfg.PublicCacheMaxAge)
+			}
+		})
+	}
+}
+
 func clearEnvVars() {
 	envVars := []string{
 		"S3_BUCKET",
@@ -236,8 +346,10 @@ func clearEnvVars() {
 		"S3_REGION",
 		"S3_CORS_ORIGINS",
 		"S3_MAX_FILE_SIZE",
+		"S3_PUBLIC_PREFIX",
+		"S3_PUBLIC_CACHE_MAX_AGE",
 	}
 	for _, v := range envVars {
-		os.Unsetenv(v)
+		_ = os.Unsetenv(v)
 	}
 }

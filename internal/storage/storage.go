@@ -135,12 +135,12 @@ func (s *Storage) PutObject(key string, contentType string, body io.Reader) (*Ob
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Copy content
 	size, err := io.Copy(file, body)
 	if err != nil {
-		os.Remove(path) // Clean up on error
+		_ = os.Remove(path) // Clean up on error
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -250,6 +250,17 @@ func (s *Storage) ListObjects(prefix string) ([]Object, error) {
 	return objects, nil
 }
 
+// EnsurePublicDir creates the public directory if it doesn't exist
+func (s *Storage) EnsurePublicDir(prefix string) error {
+	if prefix == "" {
+		return nil
+	}
+	// Remove trailing slash for directory creation
+	prefix = strings.TrimSuffix(prefix, "/")
+	publicPath := filepath.Join(s.basePath, s.bucket, prefix)
+	return os.MkdirAll(publicPath, 0755)
+}
+
 // keyToPath converts an S3 key to a filesystem path
 func (s *Storage) keyToPath(key string) string {
 	// Remove leading slash if present
@@ -284,7 +295,7 @@ func (s *Storage) cleanEmptyDirs(dir string) {
 		if err != nil || len(entries) > 0 {
 			break
 		}
-		os.Remove(dir)
+		_ = os.Remove(dir)
 		dir = filepath.Dir(dir)
 	}
 }

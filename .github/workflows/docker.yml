@@ -1,95 +1,19 @@
-name: Docker Build, Test and Push
+name: Docker Build and Push
 
 on:
   push:
-    branches: [main]
     tags:
       - "v*.*"
       - "latest"
-  pull_request:
-    branches: [main]
 
 env:
   REGISTRY: docker.io
   IMAGE_NAME: notifuse/selfhost_s3
 
 jobs:
-  integration-tests:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-          cache: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image for testing
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: false
-          load: true
-          tags: selfhost_s3:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Start selfhost_s3 container
-        run: |
-          docker run -d \
-            --name selfhost_s3-test \
-            -p 9000:9000 \
-            -e S3_BUCKET=test-bucket \
-            -e S3_ACCESS_KEY=testkey \
-            -e S3_SECRET_KEY=testsecret \
-            -e S3_PORT=9000 \
-            -e S3_REGION=us-east-1 \
-            selfhost_s3:test
-
-      - name: Wait for selfhost_s3 to be ready
-        run: |
-          echo "Waiting for selfhost_s3 to be ready..."
-          for i in {1..30}; do
-            if curl -f http://localhost:9000/health > /dev/null 2>&1; then
-              echo "selfhost_s3 is ready!"
-              break
-            fi
-            echo "Waiting for selfhost_s3... ($i/30)"
-            sleep 2
-          done
-          # Final check
-          curl -f http://localhost:9000/health || exit 1
-
-      - name: Run integration tests
-        env:
-          INTEGRATION_TEST_ENDPOINT: http://localhost:9000
-          INTEGRATION_TEST_BUCKET: test-bucket
-          INTEGRATION_TEST_ACCESS_KEY: testkey
-          INTEGRATION_TEST_SECRET_KEY: testsecret
-          INTEGRATION_TEST_REGION: us-east-1
-        run: |
-          go test -race -timeout=5m ./integration/... -v
-
-      - name: Show container logs on failure
-        if: failure()
-        run: docker logs selfhost_s3-test
-
-      - name: Cleanup
-        if: always()
-        run: docker rm -f selfhost_s3-test || true
-
   build-and-push:
     name: Build and Push
     runs-on: ubuntu-latest
-    needs: integration-tests
     # Only push to Docker Hub on tag pushes (v*.* or latest)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     permissions:

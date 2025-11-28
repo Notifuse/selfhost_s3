@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 		fmt.Println("  docker compose -f compose.test.yaml up -d")
 		os.Exit(0)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Printf("SKIP: SelfhostS3 health check failed with status %d\n", resp.StatusCode)
@@ -93,7 +93,7 @@ func cleanup() {
 
 	// Delete each object
 	for _, obj := range listOutput.Contents {
-		s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 			Bucket: aws.String(testBucket),
 			Key:    obj.Key,
 		})
@@ -105,7 +105,7 @@ func TestHealthEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("health check failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
@@ -133,10 +133,12 @@ func TestPutObject(t *testing.T) {
 	}
 
 	// Cleanup
-	defer s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-		Bucket: aws.String(testBucket),
-		Key:    aws.String(key),
-	})
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
 
 	// Verify object exists
 	headOutput, err := s3Client.HeadObject(ctx, &s3.HeadObjectInput{
@@ -168,10 +170,12 @@ func TestGetObject(t *testing.T) {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 
-	defer s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-		Bucket: aws.String(testBucket),
-		Key:    aws.String(key),
-	})
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
 
 	// Get object
 	getOutput, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
@@ -181,7 +185,7 @@ func TestGetObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
-	defer getOutput.Body.Close()
+	defer func() { _ = getOutput.Body.Close() }()
 
 	// Read and verify content
 	data, err := io.ReadAll(getOutput.Body)
@@ -209,10 +213,12 @@ func TestHeadObject(t *testing.T) {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 
-	defer s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-		Bucket: aws.String(testBucket),
-		Key:    aws.String(key),
-	})
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
 
 	headOutput, err := s3Client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(testBucket),
@@ -296,7 +302,7 @@ func TestListObjects(t *testing.T) {
 
 	defer func() {
 		for _, key := range testKeys {
-			s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 				Bucket: aws.String(testBucket),
 				Key:    aws.String(key),
 			})
@@ -350,7 +356,7 @@ func TestListObjectsWithPrefix(t *testing.T) {
 
 	defer func() {
 		for _, key := range allKeys {
-			s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 				Bucket: aws.String(testBucket),
 				Key:    aws.String(key),
 			})
@@ -400,10 +406,12 @@ func TestLargeFile(t *testing.T) {
 		t.Fatalf("PutObject failed for large file: %v", err)
 	}
 
-	defer s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-		Bucket: aws.String(testBucket),
-		Key:    aws.String(key),
-	})
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
 
 	// Download and verify
 	getOutput, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
@@ -413,7 +421,7 @@ func TestLargeFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
-	defer getOutput.Body.Close()
+	defer func() { _ = getOutput.Body.Close() }()
 
 	downloaded, err := io.ReadAll(getOutput.Body)
 	if err != nil {
@@ -454,10 +462,12 @@ func TestSpecialCharacters(t *testing.T) {
 				t.Fatalf("PutObject failed for key %q: %v", tc.key, err)
 			}
 
-			defer s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-				Bucket: aws.String(testBucket),
-				Key:    aws.String(tc.key),
-			})
+			defer func() {
+				_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+					Bucket: aws.String(testBucket),
+					Key:    aws.String(tc.key),
+				})
+			}()
 
 			// Get it back
 			getOutput, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
@@ -467,7 +477,7 @@ func TestSpecialCharacters(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetObject failed for key %q: %v", tc.key, err)
 			}
-			defer getOutput.Body.Close()
+			defer func() { _ = getOutput.Body.Close() }()
 
 			data, _ := io.ReadAll(getOutput.Body)
 			if !bytes.Equal(data, content) {
@@ -492,10 +502,12 @@ func TestOverwriteObject(t *testing.T) {
 		t.Fatalf("first PutObject failed: %v", err)
 	}
 
-	defer s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-		Bucket: aws.String(testBucket),
-		Key:    aws.String(key),
-	})
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
 
 	// Overwrite with new content
 	content2 := []byte("updated content - this is longer")
@@ -516,7 +528,7 @@ func TestOverwriteObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObject failed: %v", err)
 	}
-	defer getOutput.Body.Close()
+	defer func() { _ = getOutput.Body.Close() }()
 
 	data, _ := io.ReadAll(getOutput.Body)
 	if !bytes.Equal(data, content2) {
@@ -548,10 +560,12 @@ func TestContentType(t *testing.T) {
 				t.Fatalf("PutObject failed: %v", err)
 			}
 
-			defer s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-				Bucket: aws.String(testBucket),
-				Key:    aws.String(tc.key),
-			})
+			defer func() {
+				_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+					Bucket: aws.String(testBucket),
+					Key:    aws.String(tc.key),
+				})
+			}()
 
 			// Get and check content type
 			getOutput, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
@@ -561,7 +575,7 @@ func TestContentType(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetObject failed: %v", err)
 			}
-			getOutput.Body.Close()
+			_ = getOutput.Body.Close()
 
 			// Note: SelfhostS3 guesses content type from extension, so we check if it matches
 			if getOutput.ContentType == nil {
@@ -611,7 +625,7 @@ func TestConcurrentUploads(t *testing.T) {
 	// Cleanup
 	defer func() {
 		for _, key := range keys {
-			s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 				Bucket: aws.String(testBucket),
 				Key:    aws.String(key),
 			})
@@ -627,6 +641,470 @@ func TestConcurrentUploads(t *testing.T) {
 		if err != nil {
 			t.Errorf("file %d (%s) not found after concurrent upload: %v", i, key, err)
 		}
+	}
+}
+
+// =============================================================================
+// Public/Private Visibility Tests
+// =============================================================================
+
+// TestPublicAccess_GET verifies that GET requests to public/ prefix work without authentication
+func TestPublicAccess_GET(t *testing.T) {
+	ctx := context.Background()
+	content := []byte("This is a public file")
+	key := "public/test-public-get.txt"
+
+	// Upload file (requires auth)
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(testBucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(content),
+		ContentType: aws.String("text/plain"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// GET without authentication (direct HTTP request)
+	url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, key)
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(body, content) {
+		t.Errorf("content mismatch:\nexpected: %q\ngot: %q", string(content), string(body))
+	}
+}
+
+// TestPublicAccess_HEAD verifies that HEAD requests to public/ prefix work without authentication
+func TestPublicAccess_HEAD(t *testing.T) {
+	ctx := context.Background()
+	content := []byte("Public file for HEAD test")
+	key := "public/test-public-head.txt"
+
+	// Upload file (requires auth)
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(testBucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(content),
+		ContentType: aws.String("text/plain"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// HEAD without authentication
+	url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, key)
+	resp, err := http.Head(url)
+	if err != nil {
+		t.Fatalf("HEAD request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify content-length header
+	if resp.ContentLength != int64(len(content)) {
+		t.Errorf("expected content-length %d, got %d", len(content), resp.ContentLength)
+	}
+}
+
+// TestPrivateAccess_RequiresAuth verifies that non-public paths require authentication
+func TestPrivateAccess_RequiresAuth(t *testing.T) {
+	ctx := context.Background()
+	content := []byte("This is a private file")
+	key := "private/test-private.txt"
+
+	// Upload file (requires auth)
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(testBucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(content),
+		ContentType: aws.String("text/plain"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// GET without authentication should fail
+	url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, key)
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected status 403 for private file without auth, got %d", resp.StatusCode)
+	}
+
+	// GET with authentication should succeed
+	getOutput, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatalf("authenticated GetObject failed: %v", err)
+	}
+	defer func() { _ = getOutput.Body.Close() }()
+
+	data, _ := io.ReadAll(getOutput.Body)
+	if !bytes.Equal(data, content) {
+		t.Error("content mismatch for authenticated GET")
+	}
+}
+
+// TestPublicAccess_PutRequiresAuth verifies that PUT to public/ still requires authentication
+func TestPublicAccess_PutRequiresAuth(t *testing.T) {
+	key := "public/unauthorized-upload.txt"
+	url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, key)
+
+	// Attempt PUT without authentication
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader([]byte("unauthorized content")))
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "text/plain")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected status 403 for PUT without auth, got %d", resp.StatusCode)
+	}
+}
+
+// TestPublicAccess_DeleteRequiresAuth verifies that DELETE to public/ still requires authentication
+func TestPublicAccess_DeleteRequiresAuth(t *testing.T) {
+	ctx := context.Background()
+	key := "public/test-delete-auth.txt"
+
+	// Upload file first (with auth)
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader([]byte("delete test")),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// Attempt DELETE without authentication
+	url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, key)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected status 403 for DELETE without auth, got %d", resp.StatusCode)
+	}
+
+	// Verify file still exists
+	_, err = s3Client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Error("file should still exist after unauthorized delete attempt")
+	}
+}
+
+// TestPublicAccess_CacheControlHeader verifies that public files have Cache-Control header
+func TestPublicAccess_CacheControlHeader(t *testing.T) {
+	ctx := context.Background()
+	content := []byte("cacheable content")
+	key := "public/test-cache-header.txt"
+
+	// Upload file
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader(content),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// GET without authentication
+	url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, key)
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	cacheControl := resp.Header.Get("Cache-Control")
+	if cacheControl == "" {
+		t.Error("expected Cache-Control header for public file")
+	}
+
+	// Default is 1 year (31536000 seconds)
+	expectedCacheControl := "public, max-age=31536000"
+	if cacheControl != expectedCacheControl {
+		t.Errorf("expected Cache-Control %q, got %q", expectedCacheControl, cacheControl)
+	}
+}
+
+// TestPublicAccess_DownloadParam verifies that ?download=1 sets Content-Disposition header
+func TestPublicAccess_DownloadParam(t *testing.T) {
+	ctx := context.Background()
+	content := []byte("downloadable content")
+	key := "public/document.pdf"
+
+	// Upload file
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(testBucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(content),
+		ContentType: aws.String("application/pdf"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// GET with download=1 parameter
+	url := fmt.Sprintf("%s/%s/%s?download=1", testEndpoint, testBucket, key)
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	contentDisposition := resp.Header.Get("Content-Disposition")
+	expectedDisposition := `attachment; filename="document.pdf"`
+	if contentDisposition != expectedDisposition {
+		t.Errorf("expected Content-Disposition %q, got %q", expectedDisposition, contentDisposition)
+	}
+}
+
+// TestPublicAccess_NestedPath verifies public access works for nested paths
+func TestPublicAccess_NestedPath(t *testing.T) {
+	ctx := context.Background()
+	content := []byte("nested public file")
+	key := "public/images/2024/01/photo.jpg"
+
+	// Upload file
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(testBucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(content),
+		ContentType: aws.String("image/jpeg"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// GET without authentication
+	url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, key)
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(body, content) {
+		t.Error("content mismatch for nested public file")
+	}
+}
+
+// TestPublicAccess_NotFound returns 404 for non-existent public files
+func TestPublicAccess_NotFound(t *testing.T) {
+	url := fmt.Sprintf("%s/%s/public/nonexistent-file.txt", testEndpoint, testBucket)
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected status 404 for non-existent file, got %d", resp.StatusCode)
+	}
+}
+
+// TestPublicPrivate_BoundaryPath verifies that paths similar to public/ but not exactly matching require auth
+func TestPublicPrivate_BoundaryPath(t *testing.T) {
+	ctx := context.Background()
+
+	testCases := []struct {
+		name     string
+		key      string
+		isPublic bool
+	}{
+		{"exact public prefix", "public/file.txt", true},
+		{"public nested", "public/sub/file.txt", true},
+		{"publicasprefix (no slash)", "publicasprefix/file.txt", false}, // "publicasprefix" doesn't start with "public/"
+		{"private path", "private/file.txt", false},
+		{"root level", "file.txt", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte("test content for " + tc.key)
+
+			// Upload file (with auth)
+			_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+				Bucket: aws.String(testBucket),
+				Key:    aws.String(tc.key),
+				Body:   bytes.NewReader(content),
+			})
+			if err != nil {
+				t.Fatalf("PutObject failed: %v", err)
+			}
+
+			defer func() {
+				_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+					Bucket: aws.String(testBucket),
+					Key:    aws.String(tc.key),
+				})
+			}()
+
+			// GET without authentication
+			url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, tc.key)
+			resp, err := http.Get(url)
+			if err != nil {
+				t.Fatalf("GET request failed: %v", err)
+			}
+			_ = resp.Body.Close()
+
+			if tc.isPublic {
+				if resp.StatusCode != http.StatusOK {
+					t.Errorf("expected status 200 for public path, got %d", resp.StatusCode)
+				}
+			} else {
+				if resp.StatusCode != http.StatusForbidden {
+					t.Errorf("expected status 403 for private path, got %d", resp.StatusCode)
+				}
+			}
+		})
+	}
+}
+
+// TestPublicAccess_ContentTypePreserved verifies Content-Type is returned for public files
+func TestPublicAccess_ContentTypePreserved(t *testing.T) {
+	ctx := context.Background()
+
+	testCases := []struct {
+		key                 string
+		uploadContentType   string
+		expectedContentType string
+	}{
+		{"public/test.json", "application/json", "application/json"},
+		{"public/test.png", "image/png", "image/png"},
+		{"public/test.html", "text/html", "text/html"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.key, func(t *testing.T) {
+			content := []byte("content")
+
+			_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+				Bucket:      aws.String(testBucket),
+				Key:         aws.String(tc.key),
+				Body:        bytes.NewReader(content),
+				ContentType: aws.String(tc.uploadContentType),
+			})
+			if err != nil {
+				t.Fatalf("PutObject failed: %v", err)
+			}
+
+			defer func() {
+				_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+					Bucket: aws.String(testBucket),
+					Key:    aws.String(tc.key),
+				})
+			}()
+
+			// GET without authentication
+			url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, tc.key)
+			resp, err := http.Get(url)
+			if err != nil {
+				t.Fatalf("GET request failed: %v", err)
+			}
+			_ = resp.Body.Close()
+
+			contentType := resp.Header.Get("Content-Type")
+			// Note: server may guess content type from extension
+			if contentType == "" {
+				t.Error("expected Content-Type header")
+			}
+		})
 	}
 }
 

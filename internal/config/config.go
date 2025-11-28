@@ -9,24 +9,28 @@ import (
 
 // Config holds selfhost_s3 server configuration
 type Config struct {
-	Bucket      string
-	AccessKey   string
-	SecretKey   string
-	Port        int
-	StoragePath string
-	Region      string
-	CORSOrigins []string
-	MaxFileSize int64 // in bytes
+	Bucket            string
+	AccessKey         string
+	SecretKey         string
+	Port              int
+	StoragePath       string
+	Region            string
+	CORSOrigins       []string
+	MaxFileSize       int64  // in bytes
+	PublicPrefix      string // prefix for publicly accessible files (default: "public/")
+	PublicCacheMaxAge int    // Cache-Control max-age in seconds (default: 31536000)
 }
 
 // Load reads configuration from environment variables
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:        9000,
-		StoragePath: "./data",
-		Region:      "us-east-1",
-		CORSOrigins: []string{"*"},
-		MaxFileSize: 100 * 1024 * 1024, // 100MB default
+		Port:              9000,
+		StoragePath:       "./data",
+		Region:            "us-east-1",
+		CORSOrigins:       []string{"*"},
+		MaxFileSize:       100 * 1024 * 1024, // 100MB default
+		PublicPrefix:      "public/",         // default public prefix
+		PublicCacheMaxAge: 31536000,          // 1 year default
 	}
 
 	// Required fields
@@ -75,6 +79,25 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid S3_MAX_FILE_SIZE: %w", err)
 		}
 		cfg.MaxFileSize = size
+	}
+
+	// Public prefix configuration
+	if publicPrefix, exists := os.LookupEnv("S3_PUBLIC_PREFIX"); exists {
+		if publicPrefix == "" {
+			cfg.PublicPrefix = ""
+		} else {
+			if !strings.HasSuffix(publicPrefix, "/") {
+				publicPrefix = publicPrefix + "/"
+			}
+			cfg.PublicPrefix = publicPrefix
+		}
+	}
+
+	// Public cache max age configuration
+	if maxAge := os.Getenv("S3_PUBLIC_CACHE_MAX_AGE"); maxAge != "" {
+		if age, err := strconv.Atoi(maxAge); err == nil {
+			cfg.PublicCacheMaxAge = age
+		}
 	}
 
 	return cfg, nil

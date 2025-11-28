@@ -12,6 +12,9 @@ A minimal S3-compatible object storage server written in Go that persists files 
 
 - S3-compatible API (AWS Signature V4 authentication)
 - Local filesystem storage
+- Public file access (optional prefix-based)
+- Download mode with `?download=1` query parameter
+- Configurable cache headers for public files
 - Single binary, no dependencies
 - Multi-platform Docker images (amd64, arm64)
 
@@ -91,16 +94,18 @@ export S3_SECRET_KEY=mysecretkey
 
 selfhost_s3 is configured via environment variables:
 
-| Variable           | Required | Default     | Description                            |
-| ------------------ | -------- | ----------- | -------------------------------------- |
-| `S3_BUCKET`        | Yes      | -           | S3 bucket name                         |
-| `S3_ACCESS_KEY`    | Yes      | -           | Access key for authentication          |
-| `S3_SECRET_KEY`    | Yes      | -           | Secret key for authentication          |
-| `S3_PORT`          | No       | `9000`      | Port to listen on                      |
-| `S3_STORAGE_PATH`  | No       | `./data`    | Local directory for file storage       |
-| `S3_REGION`        | No       | `us-east-1` | AWS region (for signature validation)  |
-| `S3_CORS_ORIGINS`  | No       | `*`         | Allowed CORS origins (comma-separated) |
-| `S3_MAX_FILE_SIZE` | No       | `100MB`     | Maximum upload file size               |
+| Variable                 | Required | Default      | Description                                      |
+| ------------------------ | -------- | ------------ | ------------------------------------------------ |
+| `S3_BUCKET`              | Yes      | -            | S3 bucket name                                   |
+| `S3_ACCESS_KEY`          | Yes      | -            | Access key for authentication                    |
+| `S3_SECRET_KEY`          | Yes      | -            | Secret key for authentication                    |
+| `S3_PORT`                | No       | `9000`       | Port to listen on                                |
+| `S3_STORAGE_PATH`        | No       | `./data`     | Local directory for file storage                 |
+| `S3_REGION`              | No       | `us-east-1`  | AWS region (for signature validation)            |
+| `S3_CORS_ORIGINS`        | No       | `*`          | Allowed CORS origins (comma-separated)           |
+| `S3_MAX_FILE_SIZE`       | No       | `100MB`      | Maximum upload file size                         |
+| `S3_PUBLIC_PREFIX`       | No       | `public/`    | Prefix for public files (empty string disables)  |
+| `S3_PUBLIC_CACHE_MAX_AGE`| No       | `31536000`   | Cache-Control max-age for public files (seconds) |
 
 ## Docker Hub
 
@@ -139,6 +144,67 @@ data/
 
 - **Files**: Stored at `{storage_path}/{bucket}/{key}`
 - **Folders**: Represented as empty files with keys ending in `/`
+
+## Public Access
+
+selfhost_s3 supports serving files publicly without authentication. By default, files under the `public/` prefix are accessible via GET and HEAD requests without AWS Signature V4 authentication.
+
+### How It Works
+
+- The `public/` directory is automatically created on server startup
+- GET and HEAD requests to paths starting with the public prefix skip authentication
+- PUT and DELETE operations still require authentication (only uploads/deletes are protected)
+- Public files include `Cache-Control` headers for CDN/browser caching
+
+### Public File URLs
+
+Files in the public prefix can be accessed directly via browser:
+
+```
+http://localhost:9000/my-bucket/public/images/logo.png
+http://localhost:9000/my-bucket/public/documents/report.pdf
+```
+
+### Download Mode
+
+Add `?download=1` to force the browser to download the file instead of displaying it:
+
+```
+http://localhost:9000/my-bucket/public/report.pdf?download=1
+```
+
+This sets the `Content-Disposition: attachment` header with the filename.
+
+### Configuration Examples
+
+**Custom public prefix:**
+```bash
+S3_PUBLIC_PREFIX=assets/  # Files under assets/ are public
+```
+
+**Disable public access entirely:**
+```bash
+S3_PUBLIC_PREFIX=  # Empty string disables public access
+```
+
+**Custom cache duration (1 hour):**
+```bash
+S3_PUBLIC_CACHE_MAX_AGE=3600
+```
+
+**Disable caching:**
+```bash
+S3_PUBLIC_CACHE_MAX_AGE=0
+```
+
+### Security Recommendations
+
+When exposing files publicly:
+
+1. **Use a reverse proxy** (nginx, Caddy, Traefik) in front of selfhost_s3 for SSL/TLS
+2. **Restrict CORS origins** in production: `S3_CORS_ORIGINS=https://yourdomain.com`
+3. **Consider a CDN** for frequently accessed public files
+4. **Validate uploads** in your application before storing files in the public prefix
 
 ## CORS
 

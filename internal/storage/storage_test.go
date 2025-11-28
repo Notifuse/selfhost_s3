@@ -132,7 +132,7 @@ func TestGetObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get object: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	if obj.Key != "gettest.txt" {
 		t.Errorf("expected key 'gettest.txt', got %q", obj.Key)
@@ -533,7 +533,7 @@ func TestLargeFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get large file: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	readContent, err := io.ReadAll(reader)
 	if err != nil {
@@ -546,5 +546,89 @@ func TestLargeFile(t *testing.T) {
 
 	if !bytes.Equal(content, readContent) {
 		t.Error("content mismatch for large file")
+	}
+}
+
+func TestEnsurePublicDir(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		prefix    string
+		shouldErr bool
+	}{
+		{
+			name:      "creates public directory",
+			prefix:    "public/",
+			shouldErr: false,
+		},
+		{
+			name:      "creates custom prefix directory",
+			prefix:    "assets/",
+			shouldErr: false,
+		},
+		{
+			name:      "handles prefix without trailing slash",
+			prefix:    "files",
+			shouldErr: false,
+		},
+		{
+			name:      "empty prefix is no-op",
+			prefix:    "",
+			shouldErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := storage.EnsurePublicDir(tt.prefix)
+
+			if tt.shouldErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// For non-empty prefix, verify directory was created
+			if tt.prefix != "" {
+				prefix := strings.TrimSuffix(tt.prefix, "/")
+				dirPath := filepath.Join(tempDir, "test-bucket", prefix)
+				info, err := os.Stat(dirPath)
+				if err != nil {
+					t.Fatalf("directory not created: %v", err)
+				}
+				if !info.IsDir() {
+					t.Error("expected path to be a directory")
+				}
+			}
+		})
+	}
+}
+
+func TestEnsurePublicDir_Idempotent(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Call twice - should not error
+	err = storage.EnsurePublicDir("public/")
+	if err != nil {
+		t.Fatalf("first call failed: %v", err)
+	}
+
+	err = storage.EnsurePublicDir("public/")
+	if err != nil {
+		t.Fatalf("second call failed: %v", err)
 	}
 }

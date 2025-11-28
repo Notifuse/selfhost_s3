@@ -21,14 +21,16 @@ import (
 // testConfig creates a config for testing
 func testConfig(t *testing.T) *config.Config {
 	return &config.Config{
-		Bucket:      "test-bucket",
-		AccessKey:   "test-access-key",
-		SecretKey:   "test-secret-key",
-		Port:        9000,
-		StoragePath: t.TempDir(),
-		Region:      "us-east-1",
-		CORSOrigins: []string{"*"},
-		MaxFileSize: 10 * 1024 * 1024, // 10MB
+		Bucket:            "test-bucket",
+		AccessKey:         "test-access-key",
+		SecretKey:         "test-secret-key",
+		Port:              9000,
+		StoragePath:       t.TempDir(),
+		Region:            "us-east-1",
+		CORSOrigins:       []string{"*"},
+		MaxFileSize:       10 * 1024 * 1024, // 10MB
+		PublicPrefix:      "public/",
+		PublicCacheMaxAge: 31536000,
 	}
 }
 
@@ -162,7 +164,7 @@ func TestHealthEndpoint(t *testing.T) {
 	srv.handleHealth(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
@@ -200,7 +202,7 @@ func TestCORSMiddleware(t *testing.T) {
 	wrapped.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200 for preflight, got %d", resp.StatusCode)
@@ -241,7 +243,7 @@ func TestCORSMiddleware_SpecificOrigins(t *testing.T) {
 	wrapped.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	allowedOrigin := resp.Header.Get("Access-Control-Allow-Origin")
 	if allowedOrigin != "https://example.com" {
@@ -264,7 +266,7 @@ func TestHandleRequest_Unauthorized(t *testing.T) {
 	srv.handleRequest(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("expected status 403, got %d", resp.StatusCode)
@@ -296,7 +298,7 @@ func TestHandleRequest_WrongBucket(t *testing.T) {
 	srv.handleRequest(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", resp.StatusCode)
@@ -332,7 +334,7 @@ func TestPutAndGetObject(t *testing.T) {
 	srv.handleRequest(putW, putReq)
 
 	putResp := putW.Result()
-	defer putResp.Body.Close()
+	defer func() { _ = putResp.Body.Close() }()
 
 	if putResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(putResp.Body)
@@ -352,7 +354,7 @@ func TestPutAndGetObject(t *testing.T) {
 	srv.handleRequest(getW, getReq)
 
 	getResp := getW.Result()
-	defer getResp.Body.Close()
+	defer func() { _ = getResp.Body.Close() }()
 
 	if getResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(getResp.Body)
@@ -404,7 +406,7 @@ func TestHeadObject(t *testing.T) {
 	srv.handleRequest(headW, headReq)
 
 	headResp := headW.Result()
-	defer headResp.Body.Close()
+	defer func() { _ = headResp.Body.Close() }()
 
 	if headResp.StatusCode != http.StatusOK {
 		t.Errorf("HEAD failed with status %d", headResp.StatusCode)
@@ -449,7 +451,7 @@ func TestDeleteObject(t *testing.T) {
 	srv.handleRequest(delW, delReq)
 
 	delResp := delW.Result()
-	defer delResp.Body.Close()
+	defer func() { _ = delResp.Body.Close() }()
 
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Errorf("DELETE expected status 204, got %d", delResp.StatusCode)
@@ -499,7 +501,7 @@ func TestListObjectsV2(t *testing.T) {
 	srv.handleRequest(listW, listReq)
 
 	listResp := listW.Result()
-	defer listResp.Body.Close()
+	defer func() { _ = listResp.Body.Close() }()
 
 	if listResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(listResp.Body)
@@ -594,7 +596,7 @@ func TestGetObject_NotFound(t *testing.T) {
 	srv.handleRequest(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", resp.StatusCode)
@@ -630,7 +632,7 @@ func TestPutObject_TooLarge(t *testing.T) {
 	srv.handleRequest(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("expected status 413, got %d", resp.StatusCode)
@@ -661,7 +663,7 @@ func TestMethodNotAllowed(t *testing.T) {
 	srv.handleRequest(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", resp.StatusCode)
@@ -697,7 +699,7 @@ func TestContentTypePreserved(t *testing.T) {
 	srv.handleRequest(getW, getReq)
 
 	getResp := getW.Result()
-	defer getResp.Body.Close()
+	defer func() { _ = getResp.Body.Close() }()
 
 	// Since we're guessing from extension, .bin should give application/octet-stream
 	ct := getResp.Header.Get("Content-Type")
@@ -737,7 +739,7 @@ func TestNestedPaths(t *testing.T) {
 	srv.handleRequest(getW, getReq)
 
 	getResp := getW.Result()
-	defer getResp.Body.Close()
+	defer func() { _ = getResp.Body.Close() }()
 
 	if getResp.StatusCode != http.StatusOK {
 		t.Fatalf("GET failed with status %d", getResp.StatusCode)
@@ -746,5 +748,342 @@ func TestNestedPaths(t *testing.T) {
 	body, _ := io.ReadAll(getResp.Body)
 	if string(body) != content {
 		t.Errorf("expected content %q, got %q", content, string(body))
+	}
+}
+
+// Tests for public access feature
+
+func TestPublicAccess_GetWithoutAuth(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	content := "public file content"
+
+	// PUT object to public folder (with auth)
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/image.png", strings.NewReader(content))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	if putW.Result().StatusCode != http.StatusOK {
+		t.Fatalf("PUT failed with status %d", putW.Result().StatusCode)
+	}
+
+	// GET without auth should succeed for public path
+	getReq := httptest.NewRequest(http.MethodGet, "/test-bucket/public/image.png", nil)
+	getReq.Host = "localhost:9000"
+	// No signRequest - testing without auth
+
+	getW := httptest.NewRecorder()
+	srv.handleRequest(getW, getReq)
+
+	getResp := getW.Result()
+	defer func() { _ = getResp.Body.Close() }()
+
+	if getResp.StatusCode != http.StatusOK {
+		t.Errorf("public GET expected status 200, got %d", getResp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(getResp.Body)
+	if string(body) != content {
+		t.Errorf("expected content %q, got %q", content, string(body))
+	}
+}
+
+func TestPublicAccess_HeadWithoutAuth(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	content := "public file for head"
+
+	// PUT object to public folder (with auth)
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/headfile.txt", strings.NewReader(content))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	if putW.Result().StatusCode != http.StatusOK {
+		t.Fatalf("PUT failed with status %d", putW.Result().StatusCode)
+	}
+
+	// HEAD without auth should succeed for public path
+	headReq := httptest.NewRequest(http.MethodHead, "/test-bucket/public/headfile.txt", nil)
+	headReq.Host = "localhost:9000"
+	// No signRequest - testing without auth
+
+	headW := httptest.NewRecorder()
+	srv.handleRequest(headW, headReq)
+
+	headResp := headW.Result()
+	defer func() { _ = headResp.Body.Close() }()
+
+	if headResp.StatusCode != http.StatusOK {
+		t.Errorf("public HEAD expected status 200, got %d", headResp.StatusCode)
+	}
+}
+
+func TestPublicAccess_PutWithoutAuth_Fails(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// PUT without auth should fail even for public path
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/unauthorized.txt", strings.NewReader("content"))
+	putReq.Host = "localhost:9000"
+	// No signRequest - testing without auth
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	putResp := putW.Result()
+	defer func() { _ = putResp.Body.Close() }()
+
+	if putResp.StatusCode != http.StatusForbidden {
+		t.Errorf("public PUT without auth expected status 403, got %d", putResp.StatusCode)
+	}
+}
+
+func TestPublicAccess_DeleteWithoutAuth_Fails(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// First create a file with auth
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/todelete.txt", strings.NewReader("content"))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	// DELETE without auth should fail even for public path
+	delReq := httptest.NewRequest(http.MethodDelete, "/test-bucket/public/todelete.txt", nil)
+	delReq.Host = "localhost:9000"
+	// No signRequest - testing without auth
+
+	delW := httptest.NewRecorder()
+	srv.handleRequest(delW, delReq)
+
+	delResp := delW.Result()
+	defer func() { _ = delResp.Body.Close() }()
+
+	if delResp.StatusCode != http.StatusForbidden {
+		t.Errorf("public DELETE without auth expected status 403, got %d", delResp.StatusCode)
+	}
+}
+
+func TestPublicAccess_NonPublicPath_RequiresAuth(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// First create a file with auth in non-public path
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/private/secret.txt", strings.NewReader("secret"))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	// GET without auth should fail for non-public path
+	getReq := httptest.NewRequest(http.MethodGet, "/test-bucket/private/secret.txt", nil)
+	getReq.Host = "localhost:9000"
+	// No signRequest - testing without auth
+
+	getW := httptest.NewRecorder()
+	srv.handleRequest(getW, getReq)
+
+	getResp := getW.Result()
+	defer func() { _ = getResp.Body.Close() }()
+
+	if getResp.StatusCode != http.StatusForbidden {
+		t.Errorf("non-public GET without auth expected status 403, got %d", getResp.StatusCode)
+	}
+}
+
+func TestPublicAccess_CacheControlHeader(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PublicCacheMaxAge = 3600 // 1 hour for test
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	content := "cached public content"
+
+	// PUT object to public folder
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/cached.txt", strings.NewReader(content))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	// GET without auth
+	getReq := httptest.NewRequest(http.MethodGet, "/test-bucket/public/cached.txt", nil)
+	getReq.Host = "localhost:9000"
+
+	getW := httptest.NewRecorder()
+	srv.handleRequest(getW, getReq)
+
+	getResp := getW.Result()
+	defer func() { _ = getResp.Body.Close() }()
+
+	cacheControl := getResp.Header.Get("Cache-Control")
+	expectedCacheControl := "public, max-age=3600"
+	if cacheControl != expectedCacheControl {
+		t.Errorf("expected Cache-Control %q, got %q", expectedCacheControl, cacheControl)
+	}
+}
+
+func TestPublicAccess_CacheControlDisabled(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PublicCacheMaxAge = 0 // Disabled
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	content := "no cache content"
+
+	// PUT object to public folder
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/nocache.txt", strings.NewReader(content))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	// GET without auth
+	getReq := httptest.NewRequest(http.MethodGet, "/test-bucket/public/nocache.txt", nil)
+	getReq.Host = "localhost:9000"
+
+	getW := httptest.NewRecorder()
+	srv.handleRequest(getW, getReq)
+
+	getResp := getW.Result()
+	defer func() { _ = getResp.Body.Close() }()
+
+	cacheControl := getResp.Header.Get("Cache-Control")
+	if cacheControl != "" {
+		t.Errorf("expected no Cache-Control header when disabled, got %q", cacheControl)
+	}
+}
+
+func TestPublicAccess_DownloadParam(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	content := "downloadable content"
+
+	// PUT object to public folder
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/document.pdf", strings.NewReader(content))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	// GET with download=1 parameter
+	getReq := httptest.NewRequest(http.MethodGet, "/test-bucket/public/document.pdf?download=1", nil)
+	getReq.Host = "localhost:9000"
+
+	getW := httptest.NewRecorder()
+	srv.handleRequest(getW, getReq)
+
+	getResp := getW.Result()
+	defer func() { _ = getResp.Body.Close() }()
+
+	contentDisposition := getResp.Header.Get("Content-Disposition")
+	expectedDisposition := `attachment; filename="document.pdf"`
+	if contentDisposition != expectedDisposition {
+		t.Errorf("expected Content-Disposition %q, got %q", expectedDisposition, contentDisposition)
+	}
+}
+
+func TestPublicAccess_DownloadParam_NestedPath(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	content := "nested downloadable"
+
+	// PUT object to nested public folder
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/docs/reports/annual.pdf", strings.NewReader(content))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	// GET with download=1 parameter - should use filename only, not full path
+	getReq := httptest.NewRequest(http.MethodGet, "/test-bucket/public/docs/reports/annual.pdf?download=1", nil)
+	getReq.Host = "localhost:9000"
+
+	getW := httptest.NewRecorder()
+	srv.handleRequest(getW, getReq)
+
+	getResp := getW.Result()
+	defer func() { _ = getResp.Body.Close() }()
+
+	contentDisposition := getResp.Header.Get("Content-Disposition")
+	expectedDisposition := `attachment; filename="annual.pdf"`
+	if contentDisposition != expectedDisposition {
+		t.Errorf("expected Content-Disposition %q, got %q", expectedDisposition, contentDisposition)
+	}
+}
+
+func TestPublicAccess_Disabled(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PublicPrefix = "" // Disable public access
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	content := "should require auth"
+
+	// PUT object with auth
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/file.txt", strings.NewReader(content))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	// GET without auth should fail when public access is disabled
+	getReq := httptest.NewRequest(http.MethodGet, "/test-bucket/public/file.txt", nil)
+	getReq.Host = "localhost:9000"
+	// No signRequest
+
+	getW := httptest.NewRecorder()
+	srv.handleRequest(getW, getReq)
+
+	getResp := getW.Result()
+	defer func() { _ = getResp.Body.Close() }()
+
+	if getResp.StatusCode != http.StatusForbidden {
+		t.Errorf("when public access disabled, GET without auth expected status 403, got %d", getResp.StatusCode)
 	}
 }
