@@ -2,6 +2,7 @@
 
 [![Go](https://github.com/Notifuse/selfhost_s3/actions/workflows/go.yml/badge.svg)](https://github.com/Notifuse/selfhost_s3/actions/workflows/go.yml)
 [![Docker](https://github.com/Notifuse/selfhost_s3/actions/workflows/docker.yml/badge.svg)](https://github.com/Notifuse/selfhost_s3/actions/workflows/docker.yml)
+[![Docker Hub](https://img.shields.io/docker/v/notifuse/selfhost_s3?label=Docker%20Hub&logo=docker)](https://hub.docker.com/r/notifuse/selfhost_s3)
 [![codecov](https://codecov.io/gh/Notifuse/selfhost_s3/branch/main/graph/badge.svg)](https://codecov.io/gh/Notifuse/selfhost_s3)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Notifuse/selfhost_s3)](https://goreportcard.com/report/github.com/Notifuse/selfhost_s3)
 
@@ -12,7 +13,7 @@ A minimal S3-compatible object storage server written in Go that persists files 
 - S3-compatible API (AWS Signature V4 authentication)
 - Local filesystem storage
 - Single binary, no dependencies
-- Docker support
+- Multi-platform Docker images (amd64, arm64)
 
 ## Supported S3 Operations
 
@@ -25,6 +26,66 @@ selfhost_s3 implements the minimum S3 API required by the Notifuse file manager:
 | `PutObject`     | Upload files and create folders                  |
 | `DeleteObject`  | Delete files and folders                         |
 | `HeadObject`    | Check if file exists (optional, but recommended) |
+
+## Quick Start
+
+### Docker (Recommended)
+
+Pull and run directly from Docker Hub:
+
+```bash
+docker run -d \
+  --name selfhost_s3 \
+  -p 9000:9000 \
+  -v $(pwd)/data:/data \
+  -e S3_BUCKET=my-bucket \
+  -e S3_ACCESS_KEY=myaccesskey \
+  -e S3_SECRET_KEY=mysecretkey \
+  notifuse/selfhost_s3:latest
+```
+
+### Docker Compose
+
+Create a `compose.yaml`:
+
+```yaml
+services:
+  selfhost_s3:
+    image: notifuse/selfhost_s3:latest
+    container_name: selfhost_s3
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./s3-data:/data
+    environment:
+      S3_BUCKET: my-bucket
+      S3_ACCESS_KEY: myaccesskey
+      S3_SECRET_KEY: mysecretkey
+```
+
+Then run:
+
+```bash
+docker compose up -d
+```
+
+### Build from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/Notifuse/selfhost_s3.git
+cd selfhost_s3
+
+# Build
+go build -o selfhost_s3 ./cmd/selfhost_s3
+
+# Run
+export S3_BUCKET=my-bucket
+export S3_ACCESS_KEY=myaccesskey
+export S3_SECRET_KEY=mysecretkey
+./selfhost_s3
+```
 
 ## Configuration
 
@@ -41,48 +102,17 @@ selfhost_s3 is configured via environment variables:
 | `S3_CORS_ORIGINS`  | No       | `*`         | Allowed CORS origins (comma-separated) |
 | `S3_MAX_FILE_SIZE` | No       | `100MB`     | Maximum upload file size               |
 
-## Quick Start
+## Docker Hub
 
-### Using Go
+Official images are available at [hub.docker.com/r/notifuse/selfhost_s3](https://hub.docker.com/r/notifuse/selfhost_s3)
 
-```bash
-# Build
-go build -o selfhost_s3 ./cmd/selfhost_s3
+**Available tags:**
+- `latest` - Latest stable release
+- `vX.Y` - Specific version (e.g., `v1.0`)
 
-# Run
-export S3_BUCKET=my-bucket
-export S3_ACCESS_KEY=myaccesskey
-export S3_SECRET_KEY=mysecretkey
-./selfhost_s3
-```
-
-### Using Docker
-
-```bash
-docker run -d \
-  -p 9000:9000 \
-  -v $(pwd)/data:/data \
-  -e S3_BUCKET=my-bucket \
-  -e S3_ACCESS_KEY=myaccesskey \
-  -e S3_SECRET_KEY=mysecretkey \
-  notifuse/selfhost_s3
-```
-
-### Docker Compose
-
-```yaml
-services:
-  selfhost_s3:
-    image: notifuse/selfhost_s3
-    ports:
-      - '9000:9000'
-    volumes:
-      - ./s3-data:/data
-    environment:
-      S3_BUCKET: my-bucket
-      S3_ACCESS_KEY: myaccesskey
-      S3_SECRET_KEY: mysecretkey
-```
+**Supported platforms:**
+- `linux/amd64`
+- `linux/arm64`
 
 ## Connecting from Notifuse
 
@@ -179,11 +209,6 @@ aws s3 rm s3://my-bucket/path/myfile.txt \
 - **No versioning**: Files are overwritten in place
 - **No bucket operations**: Bucket must be pre-configured via env var
 - **Single bucket**: One selfhost_s3 instance = one bucket
-
-## Client Code
-
-The Notifuse file manager client is located at:
-`/console/src/components/file_manager`
 
 ## Development
 
