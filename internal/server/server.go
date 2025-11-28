@@ -15,6 +15,9 @@ import (
 	"github.com/Notifuse/selfhost_s3/internal/storage"
 )
 
+// Version is the current version of selfhost_s3
+const Version = "v1.2"
+
 // Server represents the SelfhostS3 HTTP server
 type Server struct {
 	config  *config.Config
@@ -55,7 +58,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/", s.handleRequest)
 
 	addr := fmt.Sprintf(":%d", s.config.Port)
-	log.Printf("SelfhostS3 starting on %s", addr)
+	log.Printf("SelfhostS3 %s starting on %s", Version, addr)
 	log.Printf("Bucket: %s", s.config.Bucket)
 	log.Printf("Storage path: %s", s.config.StoragePath)
 
@@ -101,7 +104,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
+	_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"ok","version":"%s"}`, Version)))
 }
 
 // handleRequest routes S3 API requests

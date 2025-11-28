@@ -171,8 +171,9 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	if string(body) != `{"status":"ok"}` {
-		t.Errorf("expected body {\"status\":\"ok\"}, got %q", string(body))
+	expectedBody := fmt.Sprintf(`{"status":"ok","version":"%s"}`, Version)
+	if string(body) != expectedBody {
+		t.Errorf("expected body %s, got %q", expectedBody, string(body))
 	}
 
 	if resp.Header.Get("Content-Type") != "application/json" {

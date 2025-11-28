@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.2] - 2025-11-28
+
+### Added
+
+- Version information in `/health` endpoint response: `{"status":"ok","version":"v1.2"}`
+- Version logged on server startup: `SelfhostS3 v1.2 starting on :9000`
+
 ## [v1.1] - 2025-11-28
 
 ### Fixed
