@@ -307,7 +307,20 @@ func guessContentType(key string) string {
 		return "application/octet-stream"
 	}
 
-	// Check standard MIME types
+	// Handle types that have inconsistent system MIME database entries across platforms
+	// (e.g., .xml returns "text/xml" on Linux but may differ on macOS)
+	switch strings.ToLower(ext) {
+	case ".xml":
+		return "application/xml"
+	case ".woff":
+		return "font/woff"
+	case ".woff2":
+		return "font/woff2"
+	case ".webm":
+		return "video/webm"
+	}
+
+	// Check standard MIME types from system database
 	mimeType := mime.TypeByExtension(ext)
 	if mimeType != "" {
 		return mimeType
@@ -323,8 +336,6 @@ func guessContentType(key string) string {
 		return "text/css"
 	case ".html", ".htm":
 		return "text/html"
-	case ".xml":
-		return "application/xml"
 	case ".txt":
 		return "text/plain"
 	case ".png":
@@ -343,14 +354,8 @@ func guessContentType(key string) string {
 		return "application/zip"
 	case ".mp4":
 		return "video/mp4"
-	case ".webm":
-		return "video/webm"
 	case ".mp3":
 		return "audio/mpeg"
-	case ".woff":
-		return "font/woff"
-	case ".woff2":
-		return "font/woff2"
 	default:
 		return "application/octet-stream"
 	}
