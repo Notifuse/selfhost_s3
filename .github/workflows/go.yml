@@ -26,8 +26,8 @@ jobs:
 
       - name: Run unit tests
         run: |
-          # Run unit tests (exclude integration tests)
-          go test -race -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v '/integration') -v
+          # Run unit tests (exclude integration tests and cmd which has no tests)
+          go test -race -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v '/integration' | grep -v '/cmd/') -v
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
