@@ -2,15 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 ## [v1.1] - 2025-11-28
 
 ### Fixed
+
 - CORS headers now use wildcards (`*`) for `Access-Control-Allow-Headers` and `Access-Control-Expose-Headers` to support AWS SDK v3 and other S3 clients that send custom headers like `amz-sdk-invocation-id` and `amz-sdk-request`
 
 ### Added
+
 - Comprehensive CORS integration tests covering:
   - Preflight (OPTIONS) requests
   - Simple GET/HEAD requests with Origin header
@@ -21,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Max-age caching verification
 
 ### Improved
+
 - Test coverage increased to 86.3% overall
   - Server: 85.3%
   - Storage: 77.1%
@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v1.0] - 2025-11-28
 
 ### Added
+
 - Initial release of SelfhostS3
 - S3-compatible object storage server
 - AWS Signature V4 authentication
@@ -43,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive unit and integration tests
 
 ### Features
+
 - **Storage Operations**: PUT, GET, HEAD, DELETE objects
 - **Listing**: ListObjectsV2 with prefix filtering
 - **Content Types**: Automatic MIME type detection from file extension
