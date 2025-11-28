@@ -1,0 +1,38 @@
+name: Go
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run unit tests
+        run: |
+          # Run unit tests (exclude integration tests)
+          go test -race -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v '/integration') -v
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.txt
+          fail_ci_if_error: false
+          verbose: true

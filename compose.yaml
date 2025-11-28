@@ -2,9 +2,6 @@ name: selfhost_s3
 
 services:
   selfhost_s3:
-    build:
-      context: .
-      dockerfile: Dockerfile
     image: notifuse/selfhost_s3:latest
     container_name: selfhost_s3
     restart: unless-stopped
