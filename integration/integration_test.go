@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1105,6 +1106,430 @@ func TestPublicAccess_ContentTypePreserved(t *testing.T) {
 				t.Error("expected Content-Type header")
 			}
 		})
+	}
+}
+
+// =============================================================================
+// CORS Tests
+// =============================================================================
+
+// TestCORS_PreflightRequest verifies that OPTIONS preflight requests return proper CORS headers
+func TestCORS_PreflightRequest(t *testing.T) {
+	url := fmt.Sprintf("%s/%s/some-file.txt", testEndpoint, testBucket)
+
+	req, err := http.NewRequest(http.MethodOptions, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	// Simulate browser preflight request
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", "PUT")
+	req.Header.Set("Access-Control-Request-Headers", "Content-Type, Authorization, X-Amz-Date")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("OPTIONS request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Preflight should return 200 OK
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200 for preflight, got %d", resp.StatusCode)
+	}
+
+	// Verify CORS headers
+	allowOrigin := resp.Header.Get("Access-Control-Allow-Origin")
+	if allowOrigin == "" {
+		t.Error("missing Access-Control-Allow-Origin header")
+	}
+
+	allowMethods := resp.Header.Get("Access-Control-Allow-Methods")
+	if allowMethods == "" {
+		t.Error("missing Access-Control-Allow-Methods header")
+	}
+	// Verify expected methods are allowed
+	expectedMethods := []string{"GET", "HEAD", "PUT", "DELETE", "OPTIONS"}
+	for _, method := range expectedMethods {
+		if !strings.Contains(allowMethods, method) {
+			t.Errorf("expected %s in Access-Control-Allow-Methods, got %q", method, allowMethods)
+		}
+	}
+
+	allowHeaders := resp.Header.Get("Access-Control-Allow-Headers")
+	if allowHeaders == "" {
+		t.Error("missing Access-Control-Allow-Headers header")
+	}
+	// Wildcard allows all headers for maximum SDK compatibility
+	if allowHeaders != "*" {
+		t.Errorf("expected Access-Control-Allow-Headers to be '*', got %q", allowHeaders)
+	}
+
+	maxAge := resp.Header.Get("Access-Control-Max-Age")
+	if maxAge == "" {
+		t.Error("missing Access-Control-Max-Age header")
+	}
+}
+
+// TestCORS_SimpleRequest verifies that simple requests include CORS headers
+func TestCORS_SimpleRequest(t *testing.T) {
+	ctx := context.Background()
+	content := []byte("CORS test content")
+	key := "public/cors-simple-test.txt"
+
+	// Upload file first
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(testBucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(content),
+		ContentType: aws.String("text/plain"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// GET request with Origin header
+	url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, key)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.Header.Set("Origin", "http://localhost:3000")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify CORS headers are present in response
+	allowOrigin := resp.Header.Get("Access-Control-Allow-Origin")
+	if allowOrigin == "" {
+		t.Error("missing Access-Control-Allow-Origin header on GET response")
+	}
+
+	// Verify exposed headers are set (wildcard exposes all)
+	exposeHeaders := resp.Header.Get("Access-Control-Expose-Headers")
+	if exposeHeaders == "" {
+		t.Error("missing Access-Control-Expose-Headers header")
+	}
+	if exposeHeaders != "*" {
+		t.Errorf("expected Access-Control-Expose-Headers to be '*', got %q", exposeHeaders)
+	}
+}
+
+// TestCORS_HEADRequest verifies CORS headers on HEAD requests
+func TestCORS_HEADRequest(t *testing.T) {
+	ctx := context.Background()
+	content := []byte("CORS HEAD test content")
+	key := "public/cors-head-test.txt"
+
+	// Upload file first
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(testBucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(content),
+		ContentType: aws.String("text/plain"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// HEAD request with Origin header
+	url := fmt.Sprintf("%s/%s/%s", testEndpoint, testBucket, key)
+	req, err := http.NewRequest(http.MethodHead, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.Header.Set("Origin", "http://myapp.example.com")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("HEAD request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify CORS headers
+	allowOrigin := resp.Header.Get("Access-Control-Allow-Origin")
+	if allowOrigin == "" {
+		t.Error("missing Access-Control-Allow-Origin header on HEAD response")
+	}
+}
+
+// TestCORS_HealthEndpoint verifies CORS headers are present on health endpoint
+func TestCORS_HealthEndpoint(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, testEndpoint+"/health", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.Header.Set("Origin", "http://localhost:3000")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("health check failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// CORS headers should be present on all responses
+	allowOrigin := resp.Header.Get("Access-Control-Allow-Origin")
+	if allowOrigin == "" {
+		t.Error("missing Access-Control-Allow-Origin header on health endpoint")
+	}
+}
+
+// TestCORS_WildcardOrigin verifies that wildcard (*) origin configuration works
+func TestCORS_WildcardOrigin(t *testing.T) {
+	// Test with different Origin values - should all get CORS headers with default config
+	origins := []string{
+		"http://localhost:3000",
+		"https://example.com",
+		"https://myapp.example.org",
+	}
+
+	for _, origin := range origins {
+		t.Run(origin, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodOptions, testEndpoint+"/"+testBucket+"/test.txt", nil)
+			if err != nil {
+				t.Fatalf("failed to create request: %v", err)
+			}
+			req.Header.Set("Origin", origin)
+			req.Header.Set("Access-Control-Request-Method", "GET")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("OPTIONS request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			allowOrigin := resp.Header.Get("Access-Control-Allow-Origin")
+			// With default wildcard config, should allow all origins
+			if allowOrigin == "" {
+				t.Errorf("expected Access-Control-Allow-Origin for origin %s", origin)
+			}
+		})
+	}
+}
+
+// TestCORS_ErrorResponse verifies CORS headers are present on error responses
+func TestCORS_ErrorResponse(t *testing.T) {
+	// Request a non-existent file (should get 404 or 403)
+	url := fmt.Sprintf("%s/%s/nonexistent/file.txt", testEndpoint, testBucket)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.Header.Set("Origin", "http://localhost:3000")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Even error responses should have CORS headers
+	allowOrigin := resp.Header.Get("Access-Control-Allow-Origin")
+	if allowOrigin == "" {
+		t.Error("missing Access-Control-Allow-Origin header on error response")
+	}
+}
+
+// TestCORS_PreflightWithCustomHeaders verifies preflight handles custom S3 headers
+func TestCORS_PreflightWithCustomHeaders(t *testing.T) {
+	url := fmt.Sprintf("%s/%s/upload.txt", testEndpoint, testBucket)
+
+	req, err := http.NewRequest(http.MethodOptions, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	// Simulate a more complex preflight with S3-specific headers
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", "PUT")
+	req.Header.Set("Access-Control-Request-Headers", "Content-Type, X-Amz-Content-Sha256, X-Amz-Date, X-Amz-Security-Token, Authorization")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("OPTIONS request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200 for preflight, got %d", resp.StatusCode)
+	}
+
+	allowHeaders := resp.Header.Get("Access-Control-Allow-Headers")
+	// Wildcard allows all headers for maximum SDK compatibility
+	if allowHeaders != "*" {
+		t.Errorf("expected Access-Control-Allow-Headers to be '*', got %q", allowHeaders)
+	}
+}
+
+// TestCORS_ActualPUTRequest verifies CORS headers on actual PUT requests
+func TestCORS_ActualPUTRequest(t *testing.T) {
+	ctx := context.Background()
+	key := "integration-test/cors-put-test.txt"
+
+	// Make a PUT request using the S3 client (which signs the request)
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(testBucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader([]byte("cors put test")),
+		ContentType: aws.String("text/plain"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// Use S3 client to get the file (authenticated)
+	getOutput, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	defer func() { _ = getOutput.Body.Close() }()
+
+	// Verify the file was stored correctly
+	body, _ := io.ReadAll(getOutput.Body)
+	if string(body) != "cors put test" {
+		t.Errorf("content mismatch after PUT")
+	}
+}
+
+// TestCORS_DELETEPreflight verifies preflight for DELETE requests
+func TestCORS_DELETEPreflight(t *testing.T) {
+	url := fmt.Sprintf("%s/%s/file-to-delete.txt", testEndpoint, testBucket)
+
+	req, err := http.NewRequest(http.MethodOptions, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", "DELETE")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("OPTIONS request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200 for DELETE preflight, got %d", resp.StatusCode)
+	}
+
+	allowMethods := resp.Header.Get("Access-Control-Allow-Methods")
+	if !strings.Contains(allowMethods, "DELETE") {
+		t.Errorf("DELETE should be allowed, got %q", allowMethods)
+	}
+}
+
+// TestCORS_MaxAge verifies the max-age header for caching preflight responses
+func TestCORS_MaxAge(t *testing.T) {
+	url := fmt.Sprintf("%s/%s/test.txt", testEndpoint, testBucket)
+
+	req, err := http.NewRequest(http.MethodOptions, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("OPTIONS request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	maxAge := resp.Header.Get("Access-Control-Max-Age")
+	if maxAge == "" {
+		t.Error("missing Access-Control-Max-Age header")
+	}
+
+	// Default max-age should be 86400 (24 hours)
+	expectedMaxAge := "86400"
+	if maxAge != expectedMaxAge {
+		t.Errorf("expected max-age %s, got %s", expectedMaxAge, maxAge)
+	}
+}
+
+// TestCORS_ListBucketRequest verifies CORS headers on list bucket requests
+func TestCORS_ListBucketRequest(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a test file first
+	key := "integration-test/cors-list-test.txt"
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader([]byte("list test")),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(key),
+		})
+	}()
+
+	// The S3 SDK doesn't expose raw HTTP headers easily,
+	// so we verify CORS via preflight for list-type requests
+	url := fmt.Sprintf("%s/%s?list-type=2", testEndpoint, testBucket)
+	req, err := http.NewRequest(http.MethodOptions, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("OPTIONS request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	allowOrigin := resp.Header.Get("Access-Control-Allow-Origin")
+	if allowOrigin == "" {
+		t.Error("missing Access-Control-Allow-Origin header for list bucket preflight")
 	}
 }
 

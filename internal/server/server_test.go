@@ -1087,3 +1087,170 @@ func TestPublicAccess_Disabled(t *testing.T) {
 		t.Errorf("when public access disabled, GET without auth expected status 403, got %d", getResp.StatusCode)
 	}
 }
+
+func TestDeleteObject_InvalidPath(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// DELETE with path traversal attempt
+	delReq := httptest.NewRequest(http.MethodDelete, "/test-bucket/../../../etc/passwd", nil)
+	delReq.Host = "localhost:9000"
+	signRequest(delReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	delW := httptest.NewRecorder()
+	srv.handleRequest(delW, delReq)
+
+	delResp := delW.Result()
+	defer func() { _ = delResp.Body.Close() }()
+
+	if delResp.StatusCode != http.StatusBadRequest {
+		t.Errorf("DELETE with invalid path expected status 400, got %d", delResp.StatusCode)
+	}
+
+	var errResp ErrorResponse
+	if err := xml.NewDecoder(delResp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if errResp.Code != "InvalidArgument" {
+		t.Errorf("expected error code 'InvalidArgument', got %q", errResp.Code)
+	}
+}
+
+func TestPutObject_InvalidPath(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// PUT with path traversal attempt
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/../../../etc/passwd", strings.NewReader("malicious"))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	putResp := putW.Result()
+	defer func() { _ = putResp.Body.Close() }()
+
+	if putResp.StatusCode != http.StatusBadRequest {
+		t.Errorf("PUT with invalid path expected status 400, got %d", putResp.StatusCode)
+	}
+
+	var errResp ErrorResponse
+	if err := xml.NewDecoder(putResp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if errResp.Code != "InvalidArgument" {
+		t.Errorf("expected error code 'InvalidArgument', got %q", errResp.Code)
+	}
+}
+
+func TestHeadObject_NotFound(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// HEAD for non-existent object
+	headReq := httptest.NewRequest(http.MethodHead, "/test-bucket/nonexistent.txt", nil)
+	headReq.Host = "localhost:9000"
+	signRequest(headReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	headW := httptest.NewRecorder()
+	srv.handleRequest(headW, headReq)
+
+	headResp := headW.Result()
+	defer func() { _ = headResp.Body.Close() }()
+
+	if headResp.StatusCode != http.StatusNotFound {
+		t.Errorf("HEAD for non-existent object expected status 404, got %d", headResp.StatusCode)
+	}
+}
+
+func TestPublicAccess_HeadCacheControlHeader(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PublicCacheMaxAge = 7200 // 2 hours
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	content := "cached public content"
+
+	// PUT object to public folder
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/public/cachedhead.txt", strings.NewReader(content))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	// HEAD without auth on public path
+	headReq := httptest.NewRequest(http.MethodHead, "/test-bucket/public/cachedhead.txt", nil)
+	headReq.Host = "localhost:9000"
+
+	headW := httptest.NewRecorder()
+	srv.handleRequest(headW, headReq)
+
+	headResp := headW.Result()
+	defer func() { _ = headResp.Body.Close() }()
+
+	if headResp.StatusCode != http.StatusOK {
+		t.Errorf("public HEAD expected status 200, got %d", headResp.StatusCode)
+	}
+
+	cacheControl := headResp.Header.Get("Cache-Control")
+	expectedCacheControl := "public, max-age=7200"
+	if cacheControl != expectedCacheControl {
+		t.Errorf("expected Cache-Control %q, got %q", expectedCacheControl, cacheControl)
+	}
+}
+
+func TestListObjectsV2_LegacyWithoutListType(t *testing.T) {
+	cfg := testConfig(t)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Create an object
+	putReq := httptest.NewRequest(http.MethodPut, "/test-bucket/legacy-list.txt", strings.NewReader("content"))
+	putReq.Host = "localhost:9000"
+	signRequest(putReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	putW := httptest.NewRecorder()
+	srv.handleRequest(putW, putReq)
+
+	// GET bucket without key (legacy list)
+	listReq := httptest.NewRequest(http.MethodGet, "/test-bucket/", nil)
+	listReq.Host = "localhost:9000"
+	signRequest(listReq, cfg.AccessKey, cfg.SecretKey, cfg.Region)
+
+	listW := httptest.NewRecorder()
+	srv.handleRequest(listW, listReq)
+
+	listResp := listW.Result()
+	defer func() { _ = listResp.Body.Close() }()
+
+	if listResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(listResp.Body)
+		t.Fatalf("legacy LIST failed with status %d: %s", listResp.StatusCode, string(body))
+	}
+
+	var result ListBucketResult
+	if err := xml.NewDecoder(listResp.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode list response: %v", err)
+	}
+
+	if result.Name != "test-bucket" {
+		t.Errorf("expected bucket name 'test-bucket', got %q", result.Name)
+	}
+}

@@ -1,0 +1,12 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 70%
+        threshold: 10%
+    patch: off
+  range: '60...80'
+  # Exclude mock files from coverage calculation
+  ignore:
+    - '**/cmd/**'
+    - '**/integration/**'

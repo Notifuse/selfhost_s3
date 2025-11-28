@@ -83,8 +83,8 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 
 		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Amz-Date, X-Amz-Content-Sha256, X-Amz-Security-Token")
-		w.Header().Set("Access-Control-Expose-Headers", "ETag, Content-Length, Content-Type, X-Amz-Request-Id")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+		w.Header().Set("Access-Control-Expose-Headers", "*")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		// Handle preflight requests
