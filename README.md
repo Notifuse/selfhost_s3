@@ -128,6 +128,7 @@ In your workspace settings, configure the File Manager with:
 - **Access Key**: Your `S3_ACCESS_KEY` value
 - **Secret Key**: Your `S3_SECRET_KEY` value
 - **Region**: `us-east-1` (default)
+- **Path-style**: Enabled (required)
 
 ## Storage Structure
 
