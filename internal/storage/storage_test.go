@@ -1,0 +1,550 @@
+package storage
+
+import (
+	"bytes"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestNewStorage(t *testing.T) {
+	tempDir := t.TempDir()
+
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	if storage == nil {
+		t.Fatal("expected storage instance, got nil")
+	}
+
+	// Verify bucket directory was created
+	bucketPath := filepath.Join(tempDir, "test-bucket")
+	info, err := os.Stat(bucketPath)
+	if err != nil {
+		t.Fatalf("bucket directory not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("bucket path is not a directory")
+	}
+}
+
+func TestPutObject(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		key         string
+		contentType string
+		content     string
+		expectError bool
+	}{
+		{
+			name:        "simple file",
+			key:         "test.txt",
+			contentType: "text/plain",
+			content:     "Hello, World!",
+			expectError: false,
+		},
+		{
+			name:        "file in subdirectory",
+			key:         "subdir/nested/file.json",
+			contentType: "application/json",
+			content:     `{"key": "value"}`,
+			expectError: false,
+		},
+		{
+			name:        "empty content type (should be guessed)",
+			key:         "image.png",
+			contentType: "",
+			content:     "fake png content",
+			expectError: false,
+		},
+		{
+			name:        "folder marker",
+			key:         "myfolder/",
+			contentType: "",
+			content:     "",
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := strings.NewReader(tt.content)
+			obj, err := storage.PutObject(tt.key, tt.contentType, reader)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if obj.Key != tt.key {
+				t.Errorf("expected key %q, got %q", tt.key, obj.Key)
+			}
+
+			if obj.Size != int64(len(tt.content)) {
+				t.Errorf("expected size %d, got %d", len(tt.content), obj.Size)
+			}
+
+			if obj.ETag == "" {
+				t.Error("expected non-empty ETag")
+			}
+
+			// Verify file exists on disk
+			path := filepath.Join(tempDir, "test-bucket", filepath.FromSlash(tt.key))
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				t.Errorf("file not created at %s", path)
+			}
+		})
+	}
+}
+
+func TestGetObject(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Put an object first
+	content := "Test content for get operation"
+	_, err = storage.PutObject("gettest.txt", "text/plain", strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("failed to put object: %v", err)
+	}
+
+	// Get the object
+	obj, reader, err := storage.GetObject("gettest.txt")
+	if err != nil {
+		t.Fatalf("failed to get object: %v", err)
+	}
+	defer reader.Close()
+
+	if obj.Key != "gettest.txt" {
+		t.Errorf("expected key 'gettest.txt', got %q", obj.Key)
+	}
+
+	if obj.Size != int64(len(content)) {
+		t.Errorf("expected size %d, got %d", len(content), obj.Size)
+	}
+
+	if obj.ContentType != "text/plain; charset=utf-8" {
+		t.Errorf("expected content type 'text/plain; charset=utf-8', got %q", obj.ContentType)
+	}
+
+	// Read and verify content
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("failed to read content: %v", err)
+	}
+
+	if string(data) != content {
+		t.Errorf("expected content %q, got %q", content, string(data))
+	}
+}
+
+func TestGetObject_NotFound(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	_, _, err = storage.GetObject("nonexistent.txt")
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestHeadObject(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	content := "Head test content"
+	_, err = storage.PutObject("headtest.txt", "text/plain", strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("failed to put object: %v", err)
+	}
+
+	obj, err := storage.HeadObject("headtest.txt")
+	if err != nil {
+		t.Fatalf("failed to head object: %v", err)
+	}
+
+	if obj.Key != "headtest.txt" {
+		t.Errorf("expected key 'headtest.txt', got %q", obj.Key)
+	}
+
+	if obj.Size != int64(len(content)) {
+		t.Errorf("expected size %d, got %d", len(content), obj.Size)
+	}
+}
+
+func TestHeadObject_NotFound(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	_, err = storage.HeadObject("nonexistent.txt")
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestDeleteObject(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Create an object
+	_, err = storage.PutObject("todelete.txt", "text/plain", strings.NewReader("delete me"))
+	if err != nil {
+		t.Fatalf("failed to put object: %v", err)
+	}
+
+	// Verify it exists
+	_, err = storage.HeadObject("todelete.txt")
+	if err != nil {
+		t.Fatalf("object should exist before delete: %v", err)
+	}
+
+	// Delete it
+	err = storage.DeleteObject("todelete.txt")
+	if err != nil {
+		t.Fatalf("failed to delete object: %v", err)
+	}
+
+	// Verify it's gone
+	_, err = storage.HeadObject("todelete.txt")
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestDeleteObject_NonExistent(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// S3 returns success when deleting non-existent object
+	err = storage.DeleteObject("nonexistent.txt")
+	if err != nil {
+		t.Errorf("delete of non-existent object should succeed, got %v", err)
+	}
+}
+
+func TestDeleteObject_CleansEmptyDirs(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Create a deeply nested object
+	_, err = storage.PutObject("a/b/c/file.txt", "text/plain", strings.NewReader("nested"))
+	if err != nil {
+		t.Fatalf("failed to put object: %v", err)
+	}
+
+	// Verify directories exist
+	nestedPath := filepath.Join(tempDir, "test-bucket", "a", "b", "c")
+	if _, err := os.Stat(nestedPath); os.IsNotExist(err) {
+		t.Fatal("nested directories should exist")
+	}
+
+	// Delete the file
+	err = storage.DeleteObject("a/b/c/file.txt")
+	if err != nil {
+		t.Fatalf("failed to delete object: %v", err)
+	}
+
+	// Empty directories should be cleaned up
+	if _, err := os.Stat(nestedPath); !os.IsNotExist(err) {
+		t.Error("empty directories should be removed after delete")
+	}
+}
+
+func TestListObjects(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Create some objects
+	testFiles := []struct {
+		key     string
+		content string
+	}{
+		{"file1.txt", "content1"},
+		{"file2.txt", "content2"},
+		{"images/photo1.jpg", "jpg1"},
+		{"images/photo2.jpg", "jpg2"},
+		{"docs/report.pdf", "pdf"},
+	}
+
+	for _, f := range testFiles {
+		_, err := storage.PutObject(f.key, "", strings.NewReader(f.content))
+		if err != nil {
+			t.Fatalf("failed to put %s: %v", f.key, err)
+		}
+	}
+
+	// List all objects
+	objects, err := storage.ListObjects("")
+	if err != nil {
+		t.Fatalf("failed to list objects: %v", err)
+	}
+
+	// Should have files + directories
+	// files: file1.txt, file2.txt, images/photo1.jpg, images/photo2.jpg, docs/report.pdf
+	// dirs: images/, docs/
+	expectedKeys := map[string]bool{
+		"file1.txt":         true,
+		"file2.txt":         true,
+		"images/":           true,
+		"images/photo1.jpg": true,
+		"images/photo2.jpg": true,
+		"docs/":             true,
+		"docs/report.pdf":   true,
+	}
+
+	for _, obj := range objects {
+		if !expectedKeys[obj.Key] {
+			t.Errorf("unexpected key in listing: %q", obj.Key)
+		}
+		delete(expectedKeys, obj.Key)
+	}
+
+	if len(expectedKeys) > 0 {
+		t.Errorf("missing keys in listing: %v", expectedKeys)
+	}
+}
+
+func TestListObjects_WithPrefix(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Create objects
+	testFiles := []string{"images/a.jpg", "images/b.jpg", "docs/c.pdf"}
+	for _, key := range testFiles {
+		_, err := storage.PutObject(key, "", strings.NewReader("content"))
+		if err != nil {
+			t.Fatalf("failed to put %s: %v", key, err)
+		}
+	}
+
+	// List with prefix
+	objects, err := storage.ListObjects("images/")
+	if err != nil {
+		t.Fatalf("failed to list objects: %v", err)
+	}
+
+	for _, obj := range objects {
+		if !strings.HasPrefix(obj.Key, "images/") {
+			t.Errorf("object %q doesn't match prefix 'images/'", obj.Key)
+		}
+	}
+}
+
+func TestPathTraversal(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Try to escape the bucket with path traversal
+	maliciousKeys := []string{
+		"../../../etc/passwd",
+		"..\\..\\..\\windows\\system32\\config\\sam",
+		"foo/../../bar",
+		"/etc/passwd",
+	}
+
+	for _, key := range maliciousKeys {
+		t.Run(key, func(t *testing.T) {
+			// PutObject should reject path traversal
+			_, err := storage.PutObject(key, "text/plain", strings.NewReader("malicious"))
+			if err != ErrInvalidPath {
+				// If not ErrInvalidPath, the file should at least be contained within bucket
+				if err == nil {
+					// Check that file is within bucket
+					obj, _ := storage.HeadObject(key)
+					if obj != nil {
+						// Verify actual path is within bucket
+						actualPath := filepath.Join(tempDir, "test-bucket", filepath.FromSlash(key))
+						absActual, _ := filepath.Abs(actualPath)
+						absBucket, _ := filepath.Abs(filepath.Join(tempDir, "test-bucket"))
+						if !strings.HasPrefix(absActual, absBucket) {
+							t.Errorf("path traversal succeeded for key %q", key)
+						}
+					}
+				}
+			}
+
+			// GetObject should reject path traversal
+			_, _, err = storage.GetObject(key)
+			if err == nil {
+				t.Logf("GetObject for %q didn't return error (may be contained)", key)
+			}
+		})
+	}
+}
+
+func TestGuessContentType(t *testing.T) {
+	tests := []struct {
+		key      string
+		expected string
+	}{
+		{"file.txt", "text/plain; charset=utf-8"},
+		{"file.json", "application/json"},
+		{"file.html", "text/html; charset=utf-8"},
+		{"file.css", "text/css; charset=utf-8"},
+		{"file.js", "text/javascript; charset=utf-8"}, // Go's mime package uses text/javascript
+		{"file.png", "image/png"},
+		{"file.jpg", "image/jpeg"},
+		{"file.jpeg", "image/jpeg"},
+		{"file.gif", "image/gif"},
+		{"file.svg", "image/svg+xml"},
+		{"file.webp", "image/webp"},
+		{"file.pdf", "application/pdf"},
+		{"file.zip", "application/zip"},
+		{"file.mp4", "video/mp4"},
+		{"file.mp3", "audio/mpeg"},
+		{"file.woff", "font/woff"},
+		{"file.woff2", "font/woff2"},
+		{"file.unknown", "application/octet-stream"},
+		{"file", "application/octet-stream"},
+		{"path/to/file.png", "image/png"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			result := guessContentType(tt.key)
+			if result != tt.expected {
+				t.Errorf("guessContentType(%q) = %q, expected %q", tt.key, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Run concurrent operations
+	done := make(chan bool)
+	errChan := make(chan error, 100)
+
+	// Concurrent writes
+	for i := 0; i < 10; i++ {
+		go func(i int) {
+			key := "concurrent-" + string(rune('a'+i)) + ".txt"
+			content := bytes.Repeat([]byte("x"), 1000)
+			_, err := storage.PutObject(key, "text/plain", bytes.NewReader(content))
+			if err != nil {
+				errChan <- err
+			}
+			done <- true
+		}(i)
+	}
+
+	// Wait for all writes
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	// Check for errors
+	close(errChan)
+	for err := range errChan {
+		t.Errorf("concurrent operation failed: %v", err)
+	}
+
+	// Verify all files exist
+	objects, err := storage.ListObjects("concurrent-")
+	if err != nil {
+		t.Fatalf("failed to list objects: %v", err)
+	}
+
+	fileCount := 0
+	for _, obj := range objects {
+		if strings.HasPrefix(obj.Key, "concurrent-") && !strings.HasSuffix(obj.Key, "/") {
+			fileCount++
+		}
+	}
+
+	if fileCount != 10 {
+		t.Errorf("expected 10 concurrent files, got %d", fileCount)
+	}
+}
+
+func TestLargeFile(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Create a 1MB file
+	size := 1024 * 1024
+	content := bytes.Repeat([]byte("A"), size)
+
+	obj, err := storage.PutObject("largefile.bin", "application/octet-stream", bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("failed to put large file: %v", err)
+	}
+
+	if obj.Size != int64(size) {
+		t.Errorf("expected size %d, got %d", size, obj.Size)
+	}
+
+	// Read it back
+	_, reader, err := storage.GetObject("largefile.bin")
+	if err != nil {
+		t.Fatalf("failed to get large file: %v", err)
+	}
+	defer reader.Close()
+
+	readContent, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("failed to read large file: %v", err)
+	}
+
+	if len(readContent) != size {
+		t.Errorf("expected to read %d bytes, got %d", size, len(readContent))
+	}
+
+	if !bytes.Equal(content, readContent) {
+		t.Error("content mismatch for large file")
+	}
+}

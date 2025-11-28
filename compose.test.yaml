@@ -1,0 +1,25 @@
+name: selfhost_s3-test
+
+services:
+  selfhost_s3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: selfhost_s3-test
+    ports:
+      - "9000:9000"
+    environment:
+      S3_BUCKET: test-bucket
+      S3_ACCESS_KEY: testkey
+      S3_SECRET_KEY: testsecret
+      S3_PORT: 9000
+      S3_STORAGE_PATH: /data
+      S3_REGION: us-east-1
+      S3_CORS_ORIGINS: "*"
+      S3_MAX_FILE_SIZE: 100MB
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 2s

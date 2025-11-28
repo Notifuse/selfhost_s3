@@ -1,0 +1,41 @@
+# Binaries
+selfhost_s3
+selfhost_s3
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Go workspace file
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data directory (runtime storage)
+data/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Dependency directories
+vendor/
