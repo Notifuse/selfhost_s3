@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -113,8 +114,18 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	if string(body) != `{"status":"ok"}` {
-		t.Errorf("unexpected health response: %s", string(body))
+	var health struct {
+		Status  string `json:"status"`
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(body, &health); err != nil {
+		t.Fatalf("failed to parse health response: %v", err)
+	}
+	if health.Status != "ok" {
+		t.Errorf("expected status 'ok', got %q", health.Status)
+	}
+	if health.Version == "" {
+		t.Error("expected version to be set")
 	}
 }
 
