@@ -16,7 +16,7 @@ import (
 )
 
 // Version is the current version of selfhost_s3
-const Version = "v1.2"
+const Version = "v1.3"
 
 // Server represents the SelfhostS3 HTTP server
 type Server struct {

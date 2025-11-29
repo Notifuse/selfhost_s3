@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.3] - 2025-11-29
+
+### Added
+
+- Folder marker support: `PUT` with trailing slash (e.g., `folder/`) creates directories
+- `DELETE` support for folder markers
+- Empty directories persist after deleting files inside (S3-like behavior)
+- Makefile with `test-unit`, `test-integration-up`, `test-integration-down`, `build` commands
+- Folder marker integration tests
+
+### Fixed
+
+- `ListObjects` prefix filter now correctly matches directories with trailing slashes
+
+### Improved
+
+- Storage test coverage increased to 80%
+
 ## [v1.2] - 2025-11-28
 
 ### Added

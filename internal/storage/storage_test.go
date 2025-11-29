@@ -256,7 +256,7 @@ func TestDeleteObject_NonExistent(t *testing.T) {
 	}
 }
 
-func TestDeleteObject_CleansEmptyDirs(t *testing.T) {
+func TestDeleteObject_PreservesEmptyDirs(t *testing.T) {
 	tempDir := t.TempDir()
 	storage, err := NewStorage(tempDir, "test-bucket")
 	if err != nil {
@@ -281,9 +281,132 @@ func TestDeleteObject_CleansEmptyDirs(t *testing.T) {
 		t.Fatalf("failed to delete object: %v", err)
 	}
 
-	// Empty directories should be cleaned up
-	if _, err := os.Stat(nestedPath); !os.IsNotExist(err) {
-		t.Error("empty directories should be removed after delete")
+	// Empty directories should be preserved (S3 folder marker behavior)
+	// This matches S3 behavior where folder markers persist even when empty
+	if _, err := os.Stat(nestedPath); os.IsNotExist(err) {
+		t.Error("empty directories should be preserved after delete (S3 folder marker behavior)")
+	}
+}
+
+func TestDeleteFolderMarker(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Create a folder marker
+	_, err = storage.PutObject("testfolder/", "", strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("failed to create folder marker: %v", err)
+	}
+
+	// Verify directory exists
+	folderPath := filepath.Join(tempDir, "test-bucket", "testfolder")
+	if _, err := os.Stat(folderPath); os.IsNotExist(err) {
+		t.Fatal("folder should exist after creation")
+	}
+
+	// Delete the folder marker
+	err = storage.DeleteObject("testfolder/")
+	if err != nil {
+		t.Fatalf("failed to delete folder marker: %v", err)
+	}
+
+	// Verify directory is removed
+	if _, err := os.Stat(folderPath); !os.IsNotExist(err) {
+		t.Error("folder should be removed after delete")
+	}
+}
+
+func TestDeleteFolderMarker_NonExistent(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Deleting non-existent folder should succeed (S3 behavior)
+	err = storage.DeleteObject("nonexistent/")
+	if err != nil {
+		t.Errorf("delete of non-existent folder should succeed, got %v", err)
+	}
+}
+
+func TestDeleteFolderMarker_NotEmpty(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Create a folder with a file inside
+	_, err = storage.PutObject("folder/", "", strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("failed to create folder marker: %v", err)
+	}
+
+	_, err = storage.PutObject("folder/file.txt", "text/plain", strings.NewReader("content"))
+	if err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+
+	// Try to delete the folder marker (should silently succeed but folder remains due to file)
+	err = storage.DeleteObject("folder/")
+	if err != nil {
+		t.Fatalf("delete should not return error: %v", err)
+	}
+
+	// Folder should still exist because it has contents
+	folderPath := filepath.Join(tempDir, "test-bucket", "folder")
+	if _, err := os.Stat(folderPath); os.IsNotExist(err) {
+		t.Error("folder with contents should still exist")
+	}
+}
+
+func TestCreateFolderMarker_Nested(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Create a nested folder marker
+	obj, err := storage.PutObject("a/b/c/nested/", "", strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("failed to create nested folder: %v", err)
+	}
+
+	if obj.Key != "a/b/c/nested/" {
+		t.Errorf("expected key 'a/b/c/nested/', got %q", obj.Key)
+	}
+
+	if obj.Size != 0 {
+		t.Errorf("expected size 0, got %d", obj.Size)
+	}
+
+	if obj.ContentType != "application/x-directory" {
+		t.Errorf("expected content type 'application/x-directory', got %q", obj.ContentType)
+	}
+
+	// Verify all directories were created
+	nestedPath := filepath.Join(tempDir, "test-bucket", "a", "b", "c", "nested")
+	if _, err := os.Stat(nestedPath); os.IsNotExist(err) {
+		t.Error("nested folder should exist")
+	}
+}
+
+func TestCreateFolderMarker_InvalidPath(t *testing.T) {
+	tempDir := t.TempDir()
+	storage, err := NewStorage(tempDir, "test-bucket")
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Try to create folder with path traversal
+	_, err = storage.PutObject("../../../etc/", "", strings.NewReader(""))
+	if err != ErrInvalidPath {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
 	}
 }
 

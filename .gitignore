@@ -39,3 +39,5 @@ data/
 
 # Dependency directories
 vendor/
+
+.claude/settings.local.json

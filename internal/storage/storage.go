@@ -118,6 +118,13 @@ func (s *Storage) PutObject(key string, contentType string, body io.Reader) (*Ob
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Handle folder markers (keys ending with /)
+	// S3 clients create these as 0-byte objects to represent "folders"
+	// We store them as actual directories on the filesystem
+	if strings.HasSuffix(key, "/") {
+		return s.createFolderMarker(key)
+	}
+
 	path := s.keyToPath(key)
 
 	if err := s.validatePath(path); err != nil {
@@ -164,10 +171,45 @@ func (s *Storage) PutObject(key string, contentType string, body io.Reader) (*Ob
 	}, nil
 }
 
+// createFolderMarker creates a directory for folder marker keys (ending with /)
+func (s *Storage) createFolderMarker(key string) (*Object, error) {
+	// Remove trailing slash to get directory path
+	dirKey := strings.TrimSuffix(key, "/")
+	path := s.keyToPath(dirKey)
+
+	if err := s.validatePath(path); err != nil {
+		return nil, err
+	}
+
+	// Create the directory
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Get directory info
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat directory: %w", err)
+	}
+
+	return &Object{
+		Key:          key,
+		Size:         0,
+		LastModified: info.ModTime(),
+		ContentType:  "application/x-directory",
+		ETag:         generateETag(info),
+	}, nil
+}
+
 // DeleteObject removes an object from storage
 func (s *Storage) DeleteObject(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Handle folder marker deletion (keys ending with /)
+	if strings.HasSuffix(key, "/") {
+		return s.deleteFolderMarker(key)
+	}
 
 	path := s.keyToPath(key)
 
@@ -189,8 +231,43 @@ func (s *Storage) DeleteObject(key string) error {
 		return fmt.Errorf("failed to delete file: %w", err)
 	}
 
-	// Try to clean up empty parent directories
-	s.cleanEmptyDirs(filepath.Dir(path))
+	// Note: We intentionally do NOT clean up empty parent directories.
+	// This matches S3 behavior where folder markers (created via PUT with trailing /)
+	// persist even when empty. Users who want to delete a folder must explicitly
+	// delete the folder marker key (e.g., DELETE myfolder/).
+
+	return nil
+}
+
+// deleteFolderMarker removes a directory that was created as a folder marker
+func (s *Storage) deleteFolderMarker(key string) error {
+	// Remove trailing slash to get directory path
+	dirKey := strings.TrimSuffix(key, "/")
+	path := s.keyToPath(dirKey)
+
+	if err := s.validatePath(path); err != nil {
+		return err
+	}
+
+	// Check if it exists
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// S3 returns success even if object doesn't exist
+			return nil
+		}
+		return fmt.Errorf("failed to stat directory: %w", err)
+	}
+
+	// Only delete if it's a directory and empty
+	if info.IsDir() {
+		err := os.Remove(path)
+		if err != nil {
+			// If directory is not empty, that's fine - S3 would fail silently too
+			// since the folder marker and its contents are separate objects
+			return nil
+		}
+	}
 
 	return nil
 }
@@ -222,14 +299,14 @@ func (s *Storage) ListObjects(prefix string) ([]Object, error) {
 		// Convert to forward slashes for S3 compatibility
 		key := filepath.ToSlash(relPath)
 
-		// Apply prefix filter if provided
-		if prefix != "" && !strings.HasPrefix(key, prefix) {
-			return nil
-		}
-
 		// For directories, add trailing slash (S3 folder convention)
 		if info.IsDir() {
 			key = key + "/"
+		}
+
+		// Apply prefix filter if provided
+		if prefix != "" && !strings.HasPrefix(key, prefix) {
+			return nil
 		}
 
 		objects = append(objects, Object{
@@ -284,20 +361,6 @@ func (s *Storage) validatePath(path string) error {
 		return ErrInvalidPath
 	}
 	return nil
-}
-
-// cleanEmptyDirs removes empty parent directories up to the bucket root
-func (s *Storage) cleanEmptyDirs(dir string) {
-	bucketPath := filepath.Join(s.basePath, s.bucket)
-
-	for dir != bucketPath {
-		entries, err := os.ReadDir(dir)
-		if err != nil || len(entries) > 0 {
-			break
-		}
-		_ = os.Remove(dir)
-		dir = filepath.Dir(dir)
-	}
 }
 
 // guessContentType guesses the MIME type from file extension

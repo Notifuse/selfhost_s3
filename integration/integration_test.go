@@ -1544,6 +1544,248 @@ func TestCORS_ListBucketRequest(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Folder Marker Tests
+// =============================================================================
+
+// TestFolderMarker_Create verifies that creating a folder with trailing slash works
+func TestFolderMarker_Create(t *testing.T) {
+	ctx := context.Background()
+	folderKey := "integration-test/folders/myfolder/"
+
+	// Create folder marker (0-byte PUT with trailing slash)
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(folderKey),
+		Body:   bytes.NewReader([]byte{}),
+	})
+	if err != nil {
+		t.Fatalf("PutObject for folder marker failed: %v", err)
+	}
+
+	defer func() {
+		// Cleanup - delete the folder
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(folderKey),
+		})
+	}()
+
+	// Verify folder appears in listing
+	listOutput, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(testBucket),
+		Prefix: aws.String("integration-test/folders/"),
+	})
+	if err != nil {
+		t.Fatalf("ListObjectsV2 failed: %v", err)
+	}
+
+	found := false
+	for _, obj := range listOutput.Contents {
+		if *obj.Key == folderKey {
+			found = true
+			// Folder markers should have size 0
+			if obj.Size != nil && *obj.Size != 0 {
+				t.Errorf("expected folder marker size 0, got %d", *obj.Size)
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("folder marker %q not found in listing", folderKey)
+	}
+}
+
+// TestFolderMarker_CreateNested verifies nested folder creation
+func TestFolderMarker_CreateNested(t *testing.T) {
+	ctx := context.Background()
+	folderKey := "integration-test/folders/level1/level2/level3/"
+
+	// Create nested folder marker
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(folderKey),
+		Body:   bytes.NewReader([]byte{}),
+	})
+	if err != nil {
+		t.Fatalf("PutObject for nested folder marker failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(folderKey),
+		})
+	}()
+
+	// Verify folder appears in listing
+	listOutput, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(testBucket),
+		Prefix: aws.String("integration-test/folders/level1/"),
+	})
+	if err != nil {
+		t.Fatalf("ListObjectsV2 failed: %v", err)
+	}
+
+	found := false
+	for _, obj := range listOutput.Contents {
+		if *obj.Key == folderKey {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("nested folder marker %q not found in listing", folderKey)
+	}
+}
+
+// TestFolderMarker_PersistsWhenEmpty verifies folder exists even without files inside
+func TestFolderMarker_PersistsWhenEmpty(t *testing.T) {
+	ctx := context.Background()
+	folderKey := "integration-test/folders/emptyfolder/"
+	fileKey := "integration-test/folders/emptyfolder/tempfile.txt"
+
+	// Create folder marker
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(folderKey),
+		Body:   bytes.NewReader([]byte{}),
+	})
+	if err != nil {
+		t.Fatalf("PutObject for folder marker failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(folderKey),
+		})
+	}()
+
+	// Add a file inside the folder
+	_, err = s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(fileKey),
+		Body:   bytes.NewReader([]byte("temp content")),
+	})
+	if err != nil {
+		t.Fatalf("PutObject for file failed: %v", err)
+	}
+
+	// Delete the file
+	_, err = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(fileKey),
+	})
+	if err != nil {
+		t.Fatalf("DeleteObject failed: %v", err)
+	}
+
+	// Verify folder still exists
+	listOutput, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(testBucket),
+		Prefix: aws.String("integration-test/folders/emptyfolder"),
+	})
+	if err != nil {
+		t.Fatalf("ListObjectsV2 failed: %v", err)
+	}
+
+	found := false
+	for _, obj := range listOutput.Contents {
+		if *obj.Key == folderKey {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Error("folder marker should persist after deleting files inside")
+	}
+}
+
+// TestFolderMarker_FilesInsideFolder verifies files can be created inside folder markers
+func TestFolderMarker_FilesInsideFolder(t *testing.T) {
+	ctx := context.Background()
+	folderKey := "integration-test/folders/withfiles/"
+	fileKey := "integration-test/folders/withfiles/document.txt"
+	content := []byte("file inside folder")
+
+	// Create folder marker first
+	_, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(folderKey),
+		Body:   bytes.NewReader([]byte{}),
+	})
+	if err != nil {
+		t.Fatalf("PutObject for folder marker failed: %v", err)
+	}
+
+	defer func() {
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(fileKey),
+		})
+		_, _ = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(testBucket),
+			Key:    aws.String(folderKey),
+		})
+	}()
+
+	// Create file inside folder
+	_, err = s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(fileKey),
+		Body:   bytes.NewReader(content),
+	})
+	if err != nil {
+		t.Fatalf("PutObject for file failed: %v", err)
+	}
+
+	// Verify file can be retrieved
+	getOutput, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(testBucket),
+		Key:    aws.String(fileKey),
+	})
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	defer func() { _ = getOutput.Body.Close() }()
+
+	data, _ := io.ReadAll(getOutput.Body)
+	if !bytes.Equal(data, content) {
+		t.Error("file content mismatch")
+	}
+
+	// List and verify both folder and file appear
+	listOutput, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(testBucket),
+		Prefix: aws.String("integration-test/folders/withfiles/"),
+	})
+	if err != nil {
+		t.Fatalf("ListObjectsV2 failed: %v", err)
+	}
+
+	foundFolder := false
+	foundFile := false
+	for _, obj := range listOutput.Contents {
+		if *obj.Key == folderKey {
+			foundFolder = true
+		}
+		if *obj.Key == fileKey {
+			foundFile = true
+		}
+	}
+
+	if !foundFolder {
+		t.Error("folder marker not found in listing")
+	}
+	if !foundFile {
+		t.Error("file not found in listing")
+	}
+}
+
 // Helper function
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
