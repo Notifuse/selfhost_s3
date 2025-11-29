@@ -21,7 +21,8 @@ test-integration-up:
 	docker compose -f compose.test.yaml up -d --build
 	@echo "Waiting for container to be ready..."
 	@sleep 2
-	go test ./integration/... -v
+	go clean -testcache && go test ./integration/... -v 2>&1 | tee /tmp/integration-test.log; \
+	if grep -q "FAIL" /tmp/integration-test.log; then exit 1; fi
 
 # Stop test container
 test-integration-down:

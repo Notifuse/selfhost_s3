@@ -309,9 +309,15 @@ func (s *Storage) ListObjects(prefix string) ([]Object, error) {
 			return nil
 		}
 
+		// Directories report size 0 (S3 folder marker convention)
+		size := info.Size()
+		if info.IsDir() {
+			size = 0
+		}
+
 		objects = append(objects, Object{
 			Key:          key,
-			Size:         info.Size(),
+			Size:         size,
 			LastModified: info.ModTime(),
 			ContentType:  guessContentType(key),
 			ETag:         generateETag(info),
