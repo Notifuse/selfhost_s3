@@ -277,9 +277,25 @@ func TestCreateCanonicalQueryString(t *testing.T) {
 			expected: "a=1&b=2&c=3",
 		},
 		{
+			// SigV4 encodes a space as %20, never as "+".
 			name:     "params needing encoding",
 			query:    map[string][]string{"key": {"hello world"}},
-			expected: "key=hello+world",
+			expected: "key=hello%20world",
+		},
+		{
+			name:     "plus, slash and tilde",
+			query:    map[string][]string{"prefix": {"a+b/c~d"}},
+			expected: "prefix=a%2Bb%2Fc~d",
+		},
+		{
+			name:     "sorted by encoded name, then by value",
+			query:    map[string][]string{"b": {"2", "1"}, "a": {"z"}},
+			expected: "a=z&b=1&b=2",
+		},
+		{
+			name:     "empty value",
+			query:    map[string][]string{"list-type": {"2"}, "delimiter": {""}},
+			expected: "delimiter=&list-type=2",
 		},
 	}
 

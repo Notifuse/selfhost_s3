@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.4] - 2026-11-23
+
+### Added
+
+- Presigned URLs: a request signed in its query string, as the AWS SDK presigners produce them, is accepted. The server checks the access key, the credential scope, the signing date and the expiry (up to 7 days), and requires `host` among the signed headers. A URL signed for another region gets an error that names both regions.
+- CI lint job (`gofmt` and golangci-lint). CI now takes its Go version from `go.mod`.
+
+### Fixed
+
+- Signatures of keys and prefixes containing `(`, `)`, `@`, `+`, `!` or `'`, and of query values containing a space, were refused with `signature mismatch`. Paths and query strings are now encoded as Signature Version 4 requires.
+- Signed headers with several values, or with runs of inner spaces, were refused with `signature mismatch`. They are now canonicalized as Signature Version 4 requires.
+- The `linux/arm64` image contained an `amd64` binary. The image is now cross-compiled for each platform.
+- The body of a signed upload was not checked against its `X-Amz-Content-Sha256` hash, so a captured request could be resent with another body. A mismatch now gets `400 XAmzContentSHA256Mismatch`.
+- An upload sent without a length (chunked) that went over `S3_MAX_FILE_SIZE` was stored cut off at the limit. It now gets `413 EntityTooLarge`.
+- An upload was written straight over the existing file, so a failed or interrupted upload destroyed the previous content. Uploads now go to a temporary file, renamed into place once complete. Temporary files left by a stop are removed at startup.
+
+### Changed
+
+- The AWS SDK for Go v2 used by the tests is updated to `service/s3` v1.116.0.
+- The README now documents presigned URLs, the actual CORS headers, the limitations of `ListObjectsV2` and how to reach selfhost_s3 from Notifuse.
+
 ## [v1.3] - 2025-11-29
 
 ### Added

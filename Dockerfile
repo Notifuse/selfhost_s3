@@ -1,7 +1,11 @@
 # syntax=docker/dockerfile:1
 
 # Build stage
-FROM golang:1.25-alpine AS builder
+# Build on the runner's own platform and cross-compile for the target one.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /build
 
@@ -21,7 +25,7 @@ COPY . .
 # Build the binary
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o selfhost_s3 ./cmd/selfhost_s3
 
 # Runtime stage
