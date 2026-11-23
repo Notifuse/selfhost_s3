@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"mime"
@@ -20,6 +22,11 @@ type Object struct {
 	ETag         string
 }
 
+// tmpDirName is where uploads are written before they move into the bucket. It sits next
+// to the bucket directory, on the same filesystem, so the move is a rename, and outside it,
+// so a listing never shows a file being written.
+const tmpDirName = ".selfhost_s3-tmp"
+
 // Storage handles file operations on the local filesystem
 type Storage struct {
 	basePath string
@@ -33,6 +40,14 @@ func NewStorage(basePath, bucket string) (*Storage, error) {
 	bucketPath := filepath.Join(basePath, bucket)
 	if err := os.MkdirAll(bucketPath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create bucket directory: %w", err)
+	}
+	// Uploads still there were cut short by a stop; nothing will finish them.
+	tmpPath := filepath.Join(basePath, tmpDirName)
+	if err := os.RemoveAll(tmpPath); err != nil {
+		return nil, fmt.Errorf("failed to clear upload directory: %w", err)
+	}
+	if err := os.MkdirAll(tmpPath, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create upload directory: %w", err)
 	}
 
 	return &Storage{
@@ -115,6 +130,14 @@ func (s *Storage) HeadObject(key string) (*Object, error) {
 
 // PutObject stores an object
 func (s *Storage) PutObject(key string, contentType string, body io.Reader) (*Object, error) {
+	return s.PutObjectWithSHA256(key, contentType, body, "")
+}
+
+// PutObjectWithSHA256 stores an object whose body must hash to expectedSHA256 (hex, any
+// case); an empty expectedSHA256 checks nothing. The body is written to a temporary file
+// and renamed into place only once it is complete and verified, so a failed, interrupted
+// or refused upload leaves any previous content of the key untouched.
+func (s *Storage) PutObjectWithSHA256(key string, contentType string, body io.Reader, expectedSHA256 string) (*Object, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -137,22 +160,43 @@ func (s *Storage) PutObject(key string, contentType string, body io.Reader) (*Ob
 		return nil, fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	// Create the file
-	file, err := os.Create(path)
+	// Write to a temporary file, hashing on the way
+	tmp, err := os.CreateTemp(filepath.Join(s.basePath, tmpDirName), "upload-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)
 	}
-	defer func() { _ = file.Close() }()
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
-	// Copy content
-	size, err := io.Copy(file, body)
+	hasher := sha256.New()
+	size, err := io.Copy(io.MultiWriter(tmp, hasher), body)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
-		_ = os.Remove(path) // Clean up on error
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
+	if expectedSHA256 != "" && !strings.EqualFold(hex.EncodeToString(hasher.Sum(nil)), expectedSHA256) {
+		return nil, ErrContentSHA256Mismatch
+	}
+
+	// CreateTemp makes the file private; keep the permissions os.Create used to give
+	if err := os.Chmod(tmpPath, 0644); err != nil {
+		return nil, fmt.Errorf("failed to set file permissions: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return nil, fmt.Errorf("failed to store file: %w", err)
+	}
+	committed = true
+
 	// Get file info for response
-	info, err := file.Stat()
+	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
@@ -441,4 +485,7 @@ func generateETag(info os.FileInfo) string {
 var (
 	ErrNotFound    = fmt.Errorf("object not found")
 	ErrInvalidPath = fmt.Errorf("invalid path")
+
+	// ErrContentSHA256Mismatch means the body does not hash to the signed payload hash.
+	ErrContentSHA256Mismatch = fmt.Errorf("content SHA-256 does not match")
 )

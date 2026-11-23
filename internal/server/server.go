@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,7 +18,7 @@ import (
 )
 
 // Version is the current version of selfhost_s3
-const Version = "v1.3"
+const Version = "v1.4"
 
 // Server represents the SelfhostS3 HTTP server
 type Server struct {
@@ -104,7 +106,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"ok","version":"%s"}`, Version)))
+	_, _ = fmt.Fprintf(w, `{"status":"ok","version":"%s"}`, Version)
 }
 
 // handleRequest routes S3 API requests
@@ -241,21 +243,47 @@ func (s *Server) handlePutObject(w http.ResponseWriter, r *http.Request, key str
 		contentType = "application/octet-stream"
 	}
 
-	// Limit reader to max file size
-	limitedReader := io.LimitReader(r.Body, s.config.MaxFileSize+1)
+	// A body without a declared length (chunked) is cut off at the limit with an error,
+	// so it is refused rather than stored truncated.
+	limitedBody := http.MaxBytesReader(w, r.Body, s.config.MaxFileSize)
 
-	obj, err := s.storage.PutObject(key, contentType, limitedReader)
+	obj, err := s.storage.PutObjectWithSHA256(key, contentType, limitedBody, signedPayloadHash(r))
 	if err != nil {
-		if err == storage.ErrInvalidPath {
+		var tooLarge *http.MaxBytesError
+		switch {
+		case errors.Is(err, storage.ErrInvalidPath):
 			s.sendError(w, http.StatusBadRequest, "InvalidArgument", "Invalid key")
-			return
+		case errors.Is(err, storage.ErrContentSHA256Mismatch):
+			s.sendError(w, http.StatusBadRequest, "XAmzContentSHA256Mismatch",
+				"The provided 'x-amz-content-sha256' header does not match what was computed.")
+		case errors.As(err, &tooLarge):
+			s.sendError(w, http.StatusRequestEntityTooLarge, "EntityTooLarge",
+				fmt.Sprintf("Your proposed upload exceeds the maximum allowed size of %d bytes", s.config.MaxFileSize))
+		default:
+			s.sendError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
-		s.sendError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 
 	w.Header().Set("ETag", obj.ETag)
 	w.WriteHeader(http.StatusOK)
+}
+
+// signedPayloadHash returns the body hash that a request signed in its Authorization
+// header, or "" when the body is not signed: UNSIGNED-PAYLOAD, a streaming payload, or a
+// presigned URL, whose X-Amz-Content-Sha256 header is not covered by the signature.
+func signedPayloadHash(r *http.Request) string {
+	if r.Header.Get("Authorization") == "" {
+		return ""
+	}
+	hash := r.Header.Get("X-Amz-Content-Sha256")
+	if len(hash) != 64 {
+		return ""
+	}
+	if _, err := hex.DecodeString(hash); err != nil {
+		return ""
+	}
+	return hash
 }
 
 // handleDeleteObject handles DELETE requests
